@@ -20,8 +20,7 @@ const Home = () => {
       title: "Upload file", 
       color: "blue", 
       icon: "⬆️",
-      onClick: () => {console.log("Upload button clicked!"); // Basic verification
-      navigate("/upload");}},
+      onClick: () => navigate("/upload")},
     { 
       title: "New team", 
       color: "green", 
