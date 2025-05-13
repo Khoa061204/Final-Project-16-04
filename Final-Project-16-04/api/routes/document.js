@@ -2,6 +2,7 @@
 const express = require("express");
 const router = express.Router();
 const jwt = require("jsonwebtoken");
+const { S3Client, PutObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
 const AppDataSource = require("../data-source");
 const Document = require("../src/entities/Document");
 
@@ -29,26 +30,77 @@ const authenticate = async (req, res, next) => {
   }
 };
 
+// S3 client initialization
+const s3 = new S3Client({
+  region: process.env.AWS_REGION || 'ap-southeast-2',
+  credentials: {
+    accessKeyId: process.env.REACT_APP_AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.REACT_APP_AWS_SECRET_ACCESS_KEY,
+  },
+});
+
 // Create document
 router.post("/", authenticate, async (req, res) => {
-  const { title } = req.body;
+  const { title, content } = req.body;
   
   try {
     const documentRepo = AppDataSource.getRepository(Document);
     
+    // Generate a unique key for S3
+    const s3Key = `documents/${req.user.id}/${Date.now()}-${title.replace(/[^a-zA-Z0-9]/g, '_')}`;
+    
+    // Prepare document content
+    const documentContent = content || { 
+      type: 'doc',
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: '' }] }]
+    };
+
+    // Upload to S3
+    const uploadParams = {
+      Bucket: process.env.REACT_APP_AWS_BUCKET_NAME,
+      Key: s3Key,
+      Body: JSON.stringify(documentContent),
+      ContentType: 'application/json'
+    };
+
+    console.log('📤 Attempting to upload document to S3:', {
+      bucket: process.env.REACT_APP_AWS_BUCKET_NAME,
+      key: s3Key,
+      contentType: 'application/json'
+    });
+
+    try {
+      await s3.send(new PutObjectCommand(uploadParams));
+      console.log('✅ Document content uploaded to S3 successfully');
+    } catch (s3Error) {
+      console.error("❌ S3 upload error:", s3Error);
+      return res.status(500).json({ 
+        message: "Failed to upload to S3", 
+        error: s3Error.message 
+      });
+    }
+    
+    // Create document record in database
     const newDocument = documentRepo.create({
       title: title || "Untitled Document",
-      content: JSON.stringify({ blocks: [] }),
+      content: JSON.stringify(documentContent), // Keep a copy in DB for quick access
       userId: req.user.id,
+      s3Key: s3Key,
       createdAt: new Date(),
       updatedAt: new Date()
     });
     
     await documentRepo.save(newDocument);
     
+    // Generate S3 URL
+    const s3Url = `https://${process.env.REACT_APP_AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION || 'ap-southeast-2'}.amazonaws.com/${s3Key}`;
+    
     res.status(201).json({ 
       message: "✅ Document created successfully", 
-      document: newDocument 
+      document: {
+        ...newDocument,
+        s3Url
+      }
     });
   } catch (error) {
     console.error("❌ Document creation error:", error);
@@ -114,15 +166,49 @@ router.put("/:id", authenticate, async (req, res) => {
       return res.status(404).json({ message: "❌ Document not found" });
     }
     
+    // Update S3 if content is provided
+    if (content) {
+      const uploadParams = {
+        Bucket: process.env.REACT_APP_AWS_BUCKET_NAME,
+        Key: document.s3Key,
+        Body: JSON.stringify(content),
+        ContentType: 'application/json'
+      };
+
+      console.log('📤 Attempting to update document in S3:', {
+        bucket: process.env.REACT_APP_AWS_BUCKET_NAME,
+        key: document.s3Key,
+        contentType: 'application/json'
+      });
+
+      try {
+        await s3.send(new PutObjectCommand(uploadParams));
+        console.log('✅ Document content updated in S3 successfully');
+      } catch (s3Error) {
+        console.error("❌ S3 update error:", s3Error);
+        return res.status(500).json({ 
+          message: "Failed to update in S3", 
+          error: s3Error.message 
+        });
+      }
+    }
+    
+    // Update document in database
     document.title = title || document.title;
-    if (content) document.content = content;
+    if (content) document.content = JSON.stringify(content);
     document.updatedAt = new Date();
     
     await documentRepo.save(document);
     
+    // Generate S3 URL
+    const s3Url = `https://${process.env.REACT_APP_AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION || 'ap-southeast-2'}.amazonaws.com/${document.s3Key}`;
+    
     res.json({ 
       message: "✅ Document updated successfully", 
-      document 
+      document: {
+        ...document,
+        s3Url
+      }
     });
   } catch (error) {
     console.error("❌ Update document error:", error);
@@ -144,6 +230,21 @@ router.delete("/:id", authenticate, async (req, res) => {
     
     if (!document) {
       return res.status(404).json({ message: "❌ Document not found" });
+    }
+
+    // Delete from S3 first
+    if (document.s3Key) {
+      const deleteParams = {
+        Bucket: process.env.REACT_APP_AWS_BUCKET_NAME,
+        Key: document.s3Key
+      };
+
+      try {
+        await s3.send(new DeleteObjectCommand(deleteParams));
+      } catch (s3Error) {
+        console.error("❌ S3 delete error:", s3Error);
+        // Continue with database deletion even if S3 deletion fails
+      }
     }
     
     await documentRepo.remove(document);

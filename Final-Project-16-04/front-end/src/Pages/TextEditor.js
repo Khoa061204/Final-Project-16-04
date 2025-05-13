@@ -32,11 +32,11 @@ const TextEditor = () => {
   const { id } = useParams();
   const navigate = useNavigate();
 
-  // Create refs to store Yjs document and provider
-  const ydoc = useRef(null);
+  // Initialize Yjs document and provider
+  const ydoc = useRef(new Y.Doc());
   const provider = useRef(null);
 
-  // Initialize editor with Yjs document
+  // Initialize editor
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -57,13 +57,10 @@ const TextEditor = () => {
     autofocus: true,
   });
 
-  // Initialize Yjs and WebSocket connection
+  // Set up WebSocket connection
   useEffect(() => {
     if (!id || !editor) return;
 
-    // Initialize Yjs document
-    ydoc.current = new Y.Doc();
-    
     // Connect to WebSocket provider
     provider.current = new WebsocketProvider(
       'ws://localhost:1234',
@@ -75,40 +72,16 @@ const TextEditor = () => {
       setStatus(event.status);
     });
 
-    // Update editor extensions with new Yjs document
-    editor.setOptions({
-      extensions: [
-        StarterKit.configure({
-          history: false,
-        }),
-        Collaboration.configure({
-          document: ydoc.current,
-          field: 'content',
-        }),
-        CollaborationCursor.configure({
-          provider: provider.current,
-          user: {
-            name: localStorage.getItem('username') || 'Anonymous',
-            color: `#${Math.floor(Math.random()*16777215).toString(16)}`,
-          },
-        }),
-      ],
-    });
-
     // Cleanup on unmount
     return () => {
-      provider.current?.destroy();
-      ydoc.current?.destroy();
+      if (provider.current) {
+        provider.current.destroy();
+      }
+      if (ydoc.current) {
+        ydoc.current.destroy();
+      }
     };
   }, [id, editor]);
-
-  // Redirect if no document ID
-  useEffect(() => {
-    if (!id) {
-      navigate('/');
-      return;
-    }
-  }, [id, navigate]);
 
   // Load document content
   useEffect(() => {
@@ -132,10 +105,15 @@ const TextEditor = () => {
         const data = await response.json();
         setTitle(data.document.title || 'Untitled Document');
         
-        // If there's content, set it in the editor
+        // If there's content and editor is ready, set the content
         if (data.document.content && editor) {
-          const content = JSON.parse(data.document.content);
-          editor.commands.setContent(content);
+          try {
+            const content = JSON.parse(data.document.content);
+            editor.commands.setContent(content);
+          } catch (err) {
+            console.error('Error parsing document content:', err);
+            setError('Failed to load document content');
+          }
         }
       } catch (err) {
         console.error('Error loading document:', err);
@@ -169,11 +147,10 @@ const TextEditor = () => {
       if (!response.ok) {
         throw new Error('Failed to save document');
       }
-
-      setSaving(false);
     } catch (err) {
       console.error('Error saving document:', err);
       setError('Failed to save document');
+    } finally {
       setSaving(false);
     }
   };
@@ -189,9 +166,13 @@ const TextEditor = () => {
     return () => clearTimeout(timeoutId);
   }, [editor?.getHTML(), title]);
 
-  if (!id) {
-    return null;
-  }
+  // Redirect if no document ID
+  useEffect(() => {
+    if (!id) {
+      navigate('/');
+      return;
+    }
+  }, [id, navigate]);
 
   if (!editor) {
     return (

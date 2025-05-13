@@ -368,13 +368,18 @@ app.post("/upload", authenticate, upload.single("file"), async (req, res) => {
       return res.status(500).json({ message: "Server configuration error: REACT_APP_AWS_BUCKET_NAME is missing" });
     }
 
-    const fileName = `${Date.now()}-${req.file.originalname}`;
-    console.log(`📤 Attempting to upload file: ${fileName}`);
+    // Generate S3 key with folder structure
+    const folder_id = req.body.folder_id;
+    const s3Key = folder_id 
+      ? `files/${req.user.id}/${folder_id}/${Date.now()}-${req.file.originalname}`
+      : `files/${req.user.id}/${Date.now()}-${req.file.originalname}`;
+
+    console.log(`📤 Attempting to upload file: ${s3Key}`);
     console.log(`🪣 Using bucket: ${process.env.REACT_APP_AWS_BUCKET_NAME}`);
 
     const params = {
       Bucket: process.env.REACT_APP_AWS_BUCKET_NAME,
-      Key: fileName,
+      Key: s3Key,
       Body: req.file.buffer,
       ContentType: req.file.mimetype,
     };
@@ -395,7 +400,7 @@ app.post("/upload", authenticate, upload.single("file"), async (req, res) => {
       });
     }
 
-    const fileUrl = `https://${process.env.REACT_APP_AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION || 'ap-southeast-2'}.amazonaws.com/${fileName}`;
+    const fileUrl = `https://${process.env.REACT_APP_AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION || 'ap-southeast-2'}.amazonaws.com/${s3Key}`;
 
     // Save file metadata to DB
     const fileRepo = AppDataSource.getRepository(File);
@@ -403,13 +408,25 @@ app.post("/upload", authenticate, upload.single("file"), async (req, res) => {
       user_id: req.user.id,
       file_name: req.file.originalname,
       file_url: fileUrl,
-      folder_id: req.body.folder_id || null
+      s3Key: s3Key,
+      folder_id: folder_id || null,
+      uploaded_at: new Date()
     });
     await fileRepo.save(newFile);
 
-    console.log(`✅ File metadata saved to DB: ${fileUrl}`);
+    console.log(`✅ File metadata saved to DB:`, {
+      name: newFile.file_name,
+      url: fileUrl,
+      folder: folder_id || 'root'
+    });
 
-    res.status(200).json({ message: "✅ Upload successful", fileUrl });
+    res.status(200).json({ 
+      message: "✅ Upload successful", 
+      file: {
+        ...newFile,
+        file_url: fileUrl
+      }
+    });
   } catch (error) {
     console.error("❌ Upload error:", error);
     res.status(500).json({ message: "File upload failed", error: error.message });
@@ -420,11 +437,28 @@ app.post("/upload", authenticate, upload.single("file"), async (req, res) => {
 app.get("/files", authenticate, async (req, res) => {
   try {
     const fileRepo = AppDataSource.getRepository(File);
+    const query = { user_id: req.user.id };
+    
+    // Add folder_id filter if provided
+    if (req.query.folder_id) {
+      query.folder_id = req.query.folder_id;
+    }
+    
     const files = await fileRepo.find({
-      where: { user_id: req.user.id },
+      where: query,
       order: { uploaded_at: "DESC" }
     });
-    res.json({ files });
+
+    // Ensure each file has a valid S3 URL
+    const filesWithUrls = files.map(file => ({
+      ...file,
+      file_url: file.file_url || (file.s3Key ? 
+        `https://${process.env.REACT_APP_AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION || 'ap-southeast-2'}.amazonaws.com/${file.s3Key}` 
+        : null)
+    }));
+
+    console.log('📄 Returning files:', filesWithUrls.length);
+    res.json({ files: filesWithUrls });
   } catch (error) {
     console.error("❌ Get files error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
@@ -574,17 +608,60 @@ server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
 // ✅ Create a new folder
 app.post("/folders", authenticate, async (req, res) => {
   try {
-    const { name } = req.body;
+    const { name, parent_id } = req.body;
     if (!name || !name.trim()) {
-      return res.status(400).json({ message: "Folder name is required" });
+      return res.status(400).json({ message: "❌ Folder name is required" });
     }
+
     const folderRepo = AppDataSource.getRepository(Folder);
+    
+    // If parent_id is provided, verify it exists and belongs to the user
+    let parentFolder = null;
+    let folderPath = '';
+    
+    if (parent_id) {
+      parentFolder = await folderRepo.findOne({
+        where: { 
+          id: parent_id,
+          user_id: req.user.id 
+        }
+      });
+      
+      if (!parentFolder) {
+        return res.status(404).json({ message: "❌ Parent folder not found" });
+      }
+      
+      folderPath = parentFolder.path 
+        ? `${parentFolder.path}/${parentFolder.id}` 
+        : parentFolder.id;
+    }
+
     const newFolder = folderRepo.create({
       user_id: req.user.id,
-      name: name.trim()
+      name: name.trim(),
+      parent_id: parent_id || null,
+      path: folderPath
     });
+
     await folderRepo.save(newFolder);
-    res.status(201).json({ message: "Folder created", folder: newFolder });
+    
+    // Update the folder's path to include its own ID
+    newFolder.path = folderPath 
+      ? `${folderPath}/${newFolder.id}`
+      : newFolder.id;
+    await folderRepo.save(newFolder);
+
+    console.log('✅ Created folder:', {
+      id: newFolder.id,
+      name: newFolder.name,
+      parent_id: newFolder.parent_id,
+      path: newFolder.path
+    });
+
+    res.status(201).json({ 
+      message: "✅ Folder created", 
+      folder: newFolder 
+    });
   } catch (error) {
     console.error("❌ Create folder error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
@@ -595,28 +672,48 @@ app.post("/folders", authenticate, async (req, res) => {
 app.get("/folders", authenticate, async (req, res) => {
   try {
     const folderRepo = AppDataSource.getRepository(Folder);
+    const query = { user_id: req.user.id };
+    
+    // Add parent_id filter if provided
+    if (req.query.parent_id) {
+      query.parent_id = req.query.parent_id;
+    }
+    
     const folders = await folderRepo.find({
-      where: { user_id: req.user.id },
+      where: query,
       order: { created_at: "DESC" }
     });
     res.json({ folders });
   } catch (error) {
-    console.error("❌ Get folders error:", error);
+    console.error("❌ List folders error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
-// ✅ List files in a folder
-app.get("/folders/:id/files", authenticate, async (req, res) => {
+// ✅ Get files in a specific folder
+app.get("/folders/:folderId/files", authenticate, async (req, res) => {
   try {
     const fileRepo = AppDataSource.getRepository(File);
     const files = await fileRepo.find({
-      where: { user_id: req.user.id, folder_id: req.params.id },
+      where: { 
+        user_id: req.user.id,
+        folder_id: req.params.folderId
+      },
       order: { uploaded_at: "DESC" }
     });
-    res.json({ files });
+
+    // Ensure each file has a valid S3 URL
+    const filesWithUrls = files.map(file => ({
+      ...file,
+      file_url: file.file_url || (file.s3Key ? 
+        `https://${process.env.REACT_APP_AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION || 'ap-southeast-2'}.amazonaws.com/${file.s3Key}` 
+        : null)
+    }));
+
+    console.log(`📄 Returning files for folder ${req.params.folderId}:`, filesWithUrls.length);
+    res.json({ files: filesWithUrls });
   } catch (error) {
-    console.error("❌ Get files in folder error:", error);
+    console.error("❌ Get folder files error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 });

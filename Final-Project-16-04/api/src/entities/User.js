@@ -6,22 +6,24 @@ module.exports = new EntitySchema({
   columns: {
     id: {
       primary: true,
-      type: "int",
-      generated: true,
+      type: "varchar",
+      length: 255,
+      name: "id"
     },
     username: {
       type: "varchar",
-      unique: true,
-      nullable: false,
+      length: 255,
+      nullable: false
     },
-    email: {  // ✅ Add the email column
+    email: {
       type: "varchar",
-      unique: true,
-      nullable: false,
+      length: 255,
+      nullable: false
     },
     password: {
       type: "varchar",
-      nullable: false,
-    },
+      length: 255,
+      nullable: false
+    }
   },
 });

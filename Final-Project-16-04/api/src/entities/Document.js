@@ -19,6 +19,11 @@ module.exports = new EntitySchema({
       type: "text",
       nullable: true
     },
+    s3Key: {
+      type: "varchar",
+      length: 512,
+      nullable: true
+    },
     userId: {
       type: "uuid"
     },
