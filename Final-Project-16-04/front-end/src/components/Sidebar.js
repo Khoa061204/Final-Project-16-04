@@ -1,11 +1,23 @@
-import React, { useContext } from "react";
+import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { handleLogout } from "../utils/auth";
 import { AuthContext } from "../App";
+import { 
+  MdCloud, 
+  MdGroup, 
+  MdGroupAdd, 
+  MdNotifications,
+  MdCalendarToday,
+  MdChat,
+  MdSettings, 
+  MdLogout, 
+  MdMenu 
+} from 'react-icons/md';
 
 const Sidebar = () => {
   const navigate = useNavigate();
-  const { setIsAuthenticated, setUser, setRememberMe } = useContext(AuthContext);
+  const { setIsAuthenticated, setUser, setRememberMe } = React.useContext(AuthContext);
+  const [collapsed, setCollapsed] = useState(true);
 
   const onLogout = () => {
     // Clear authentication state
@@ -25,57 +37,77 @@ const Sidebar = () => {
   };
 
   return (
-    <div className="h-screen bg-indigo-900 w-60 flex flex-col">
-      {/* Navigation items */}
-      <nav className="px-4 flex-1">
+    <div
+      className={`h-screen bg-indigo-900 transition-all duration-300 flex flex-col z-40 ${collapsed ? 'w-16' : 'w-60'}`}
+      onMouseEnter={() => setCollapsed(false)}
+      onMouseLeave={() => setCollapsed(true)}
+      style={{ position: 'relative' }}
+    >
+      {/* Top menu icon for mobile/desktop */}
+      <div className="flex items-center justify-center py-4">
+        <MdMenu className="text-white text-2xl" />
+      </div>
+      <nav className="px-2 flex-1">
         <ul className="space-y-2">
-          <li 
-            className="bg-indigo-700 rounded px-3 py-2 text-white flex items-center cursor-pointer"
+          <li
+            className="rounded px-3 py-2 text-white flex items-center cursor-pointer hover:bg-indigo-800"
             onClick={() => navigateTo('/')}
           >
-            <span className="mr-3">🗃️</span>
-            <span>My cloud</span>
+            <MdCloud className="text-2xl mr-0.5" />
+            {!collapsed && <span className="ml-3">My Cloud</span>}
           </li>
-          <li 
+          <li
             className="rounded px-3 py-2 text-white flex items-center hover:bg-indigo-800 cursor-pointer"
-            onClick={() => navigateTo('/shared')}
+            onClick={() => navigateTo('/teams')}
           >
-            <span className="mr-3">🔄</span>
-            <span>Shared files</span>
+            <MdGroup className="text-2xl mr-0.5" />
+            {!collapsed && <span className="ml-3">My Teams</span>}
           </li>
-          <li 
+          <li
             className="rounded px-3 py-2 text-white flex items-center hover:bg-indigo-800 cursor-pointer"
-            onClick={() => navigateTo('/favorites')}
+            onClick={() => navigateTo('/teams/new')}
           >
-            <span className="mr-3">⭐</span>
-            <span>Favorites</span>
+            <MdGroupAdd className="text-2xl mr-0.5" />
+            {!collapsed && <span className="ml-3">Add Team</span>}
           </li>
-          <li 
+          <li
             className="rounded px-3 py-2 text-white flex items-center hover:bg-indigo-800 cursor-pointer"
-            onClick={() => navigateTo('/upload')}
+            onClick={() => navigateTo('/calendar')}
           >
-            <span className="mr-3">☁️</span>
-            <span>Upload files</span>
+            <MdCalendarToday className="text-2xl mr-0.5" />
+            {!collapsed && <span className="ml-3">Calendar</span>}
+          </li>
+          <li
+            className="rounded px-3 py-2 text-white flex items-center hover:bg-indigo-800 cursor-pointer"
+            onClick={() => navigateTo('/chat')}
+          >
+            <MdChat className="text-2xl mr-0.5" />
+            {!collapsed && <span className="ml-3">Team Chat</span>}
+          </li>
+          <li
+            className="rounded px-3 py-2 text-white flex items-center hover:bg-indigo-800 cursor-pointer"
+            onClick={() => navigateTo('/notifications')}
+          >
+            <MdNotifications className="text-2xl mr-0.5" />
+            {!collapsed && <span className="ml-3">Notifications</span>}
           </li>
         </ul>
       </nav>
-      
-      {/* Bottom menu items */}
-      <div className="px-4 mb-6">
+      <div className="px-2 mb-6 mt-auto">
         <ul className="space-y-2">
-          <li 
+          <li
             className="rounded px-3 py-2 text-white flex items-center hover:bg-indigo-800 cursor-pointer"
             onClick={() => navigateTo('/settings')}
           >
-            <span className="mr-3">⚙️</span>
-            <span>Settings</span>
+            <MdSettings className="text-2xl mr-0.5" />
+            {!collapsed && <span className="ml-3">Settings</span>}
           </li>
-          <li 
+          <li
             className="rounded px-3 py-2 text-white flex items-center hover:bg-indigo-800 cursor-pointer"
             onClick={onLogout}
           >
-            <span className="mr-3">🚪</span>
-            <span>Log out</span>
+            <MdLogout className="text-2xl mr-0.5" />
+            {!collapsed && <span className="ml-3">Log out</span>}
           </li>
         </ul>
       </div>

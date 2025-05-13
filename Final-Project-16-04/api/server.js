@@ -1,4 +1,14 @@
+// Load environment variables first
 require("dotenv").config();
+
+// Immediate check of environment variables
+console.log('Environment Variables Check:', {
+  bucket: process.env.REACT_APP_AWS_BUCKET_NAME,
+  region: process.env.AWS_REGION,
+  hasAccessKey: !!process.env.REACT_APP_AWS_ACCESS_KEY_ID,
+  hasSecretKey: !!process.env.REACT_APP_AWS_SECRET_ACCESS_KEY
+});
+
 const express = require("express");
 const bcrypt = require("bcryptjs");
 const cors = require("cors");
@@ -14,6 +24,8 @@ const User = require("./src/entities/User.js");
 const Document = require("./src/entities/Document.js");
 const documentRouter = require("./routes/document");
 const nodemailer = require("nodemailer");
+const File = require("./src/entities/File.js");
+const Folder = require("./src/entities/Folder.js");
 
 const app = express();
 app.use(express.json());
@@ -45,12 +57,38 @@ AppDataSource.initialize()
   .catch((err) => console.error("❌ TypeORM Connection Error:", err));
 
 // ✅ AWS S3 Configuration
-const s3 = new S3Client({
+console.log('AWS Configuration:', {
   region: process.env.AWS_REGION,
+  bucketName: process.env.REACT_APP_AWS_BUCKET_NAME,
+  hasAccessKey: !!process.env.REACT_APP_AWS_ACCESS_KEY_ID,
+  hasSecretKey: !!process.env.REACT_APP_AWS_SECRET_ACCESS_KEY
+});
+
+const s3 = new S3Client({
+  region: process.env.AWS_REGION || 'ap-southeast-2',
   credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    accessKeyId: process.env.REACT_APP_AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.REACT_APP_AWS_SECRET_ACCESS_KEY,
   },
+});
+
+// Validate AWS configuration
+if (!process.env.REACT_APP_AWS_BUCKET_NAME) {
+  console.error("❌ REACT_APP_AWS_BUCKET_NAME is not configured");
+}
+if (!process.env.REACT_APP_AWS_ACCESS_KEY_ID) {
+  console.error("❌ AWS Access Key ID is missing");
+}
+if (!process.env.REACT_APP_AWS_SECRET_ACCESS_KEY) {
+  console.error("❌ AWS Secret Access Key is missing");
+}
+
+// More detailed environment check
+console.log('AWS Environment Variables:', {
+  BUCKET_NAME: process.env.REACT_APP_AWS_BUCKET_NAME,
+  REGION: process.env.AWS_REGION,
+  ACCESS_KEY_PRESENT: !!process.env.REACT_APP_AWS_ACCESS_KEY_ID,
+  SECRET_KEY_PRESENT: !!process.env.REACT_APP_AWS_SECRET_ACCESS_KEY
 });
 
 // ✅ Multer Setup (Memory Storage)
@@ -302,32 +340,94 @@ app.post("/reset-password", async (req, res) => {
         🔵 FILE UPLOAD ROUTE
 ================================ */
 
+// Allowed MIME types for text/code files
+const allowedMimeTypes = [
+  "text/plain", "application/json", "application/xml", "text/markdown",
+  "text/x-python", "text/x-java-source", "text/x-c", "text/x-c++", "text/html",
+  "text/css", "application/javascript", "text/javascript", "application/x-sh",
+  "application/x-bat", "application/x-php", "application/x-ruby", "text/x-go",
+  "text/x-rustsrc", "text/x-swift", "text/x-kotlin", "text/x-dart", "application/sql",
+  "application/x-yaml", "text/yaml", "text/csv", "application/vnd.ms-excel"
+];
+
 // ✅ File Upload API (Direct to S3)
-app.post("/upload", upload.single("file"), async (req, res) => {
+app.post("/upload", authenticate, upload.single("file"), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ message: "❌ No file uploaded" });
     }
 
+    // Validate file type
+    if (!allowedMimeTypes.includes(req.file.mimetype)) {
+      return res.status(400).json({ message: "❌ Only text/code files are allowed" });
+    }
+
+    // Validate AWS configuration
+    if (!process.env.REACT_APP_AWS_BUCKET_NAME) {
+      console.error("❌ REACT_APP_AWS_BUCKET_NAME is missing");
+      return res.status(500).json({ message: "Server configuration error: REACT_APP_AWS_BUCKET_NAME is missing" });
+    }
+
     const fileName = `${Date.now()}-${req.file.originalname}`;
+    console.log(`📤 Attempting to upload file: ${fileName}`);
+    console.log(`🪣 Using bucket: ${process.env.REACT_APP_AWS_BUCKET_NAME}`);
 
     const params = {
-      Bucket: process.env.AWS_BUCKET_NAME,
+      Bucket: process.env.REACT_APP_AWS_BUCKET_NAME,
       Key: fileName,
-      Body: req.file.buffer, // ✅ Directly send buffer (No FS)
+      Body: req.file.buffer,
       ContentType: req.file.mimetype,
     };
 
-    await s3.send(new PutObjectCommand(params));
+    try {
+      await s3.send(new PutObjectCommand(params));
+      console.log(`✅ File uploaded to S3 successfully`);
+    } catch (s3Error) {
+      console.error("❌ S3 Upload Error:", s3Error);
+      return res.status(500).json({ 
+        message: "Failed to upload to S3", 
+        error: s3Error.message,
+        code: s3Error.code,
+        params: {
+          ...params,
+          Body: '<buffer>'
+        }
+      });
+    }
 
-    const fileUrl = `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${fileName}`;
+    const fileUrl = `https://${process.env.REACT_APP_AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION || 'ap-southeast-2'}.amazonaws.com/${fileName}`;
 
-    console.log(`✅ File uploaded successfully: ${fileUrl}`);
+    // Save file metadata to DB
+    const fileRepo = AppDataSource.getRepository(File);
+    const newFile = fileRepo.create({
+      user_id: req.user.id,
+      file_name: req.file.originalname,
+      file_url: fileUrl,
+      folder_id: req.body.folder_id || null
+    });
+    await fileRepo.save(newFile);
+
+    console.log(`✅ File metadata saved to DB: ${fileUrl}`);
 
     res.status(200).json({ message: "✅ Upload successful", fileUrl });
   } catch (error) {
     console.error("❌ Upload error:", error);
     res.status(500).json({ message: "File upload failed", error: error.message });
+  }
+});
+
+// ✅ Get all files for the current user
+app.get("/files", authenticate, async (req, res) => {
+  try {
+    const fileRepo = AppDataSource.getRepository(File);
+    const files = await fileRepo.find({
+      where: { user_id: req.user.id },
+      order: { uploaded_at: "DESC" }
+    });
+    res.json({ files });
+  } catch (error) {
+    console.error("❌ Get files error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
@@ -470,3 +570,53 @@ function leaveDocument(socket, documentId) {
 ================================ */
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+
+// ✅ Create a new folder
+app.post("/folders", authenticate, async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ message: "Folder name is required" });
+    }
+    const folderRepo = AppDataSource.getRepository(Folder);
+    const newFolder = folderRepo.create({
+      user_id: req.user.id,
+      name: name.trim()
+    });
+    await folderRepo.save(newFolder);
+    res.status(201).json({ message: "Folder created", folder: newFolder });
+  } catch (error) {
+    console.error("❌ Create folder error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+// ✅ List all folders for the current user
+app.get("/folders", authenticate, async (req, res) => {
+  try {
+    const folderRepo = AppDataSource.getRepository(Folder);
+    const folders = await folderRepo.find({
+      where: { user_id: req.user.id },
+      order: { created_at: "DESC" }
+    });
+    res.json({ folders });
+  } catch (error) {
+    console.error("❌ Get folders error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+// ✅ List files in a folder
+app.get("/folders/:id/files", authenticate, async (req, res) => {
+  try {
+    const fileRepo = AppDataSource.getRepository(File);
+    const files = await fileRepo.find({
+      where: { user_id: req.user.id, folder_id: req.params.id },
+      order: { uploaded_at: "DESC" }
+    });
+    res.json({ files });
+  } catch (error) {
+    console.error("❌ Get files in folder error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});

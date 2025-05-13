@@ -1,45 +1,141 @@
 // front-end/src/Pages/TextEditor.js
 import React, { useState, useEffect, useRef } from 'react';
-import { Editor, EditorState, RichUtils, convertToRaw, convertFromRaw } from 'draft-js';
-import 'draft-js/dist/Draft.css';
+import { useEditor, EditorContent } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
+import Collaboration from '@tiptap/extension-collaboration';
+import CollaborationCursor from '@tiptap/extension-collaboration-cursor';
+import * as Y from 'yjs';
+import { WebsocketProvider } from 'y-websocket';
 import { useParams, useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import Topbar from '../components/Topbar';
+import {
+  FaBold,
+  FaItalic,
+  FaUnderline,
+  FaListUl,
+  FaListOl,
+  FaQuoteLeft,
+  FaRedo,
+  FaUndo,
+  FaHeading,
+  FaCode,
+} from 'react-icons/fa';
+
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 const TextEditor = () => {
-  const [editorState, setEditorState] = useState(EditorState.createEmpty());
-  const [title, setTitle] = useState('Untitled Document');
+  const [title, setTitle] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [status, setStatus] = useState('connecting');
   const { id } = useParams();
   const navigate = useNavigate();
-  const editorRef = useRef(null);
 
-  // Get auth token from localStorage
-  const getToken = () => localStorage.getItem('authToken');
+  // Create refs to store Yjs document and provider
+  const ydoc = useRef(null);
+  const provider = useRef(null);
+
+  // Initialize editor with Yjs document
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({
+        history: false,
+      }),
+      Collaboration.configure({
+        document: ydoc.current,
+        field: 'content',
+      }),
+      CollaborationCursor.configure({
+        provider: provider.current,
+        user: {
+          name: localStorage.getItem('username') || 'Anonymous',
+          color: `#${Math.floor(Math.random()*16777215).toString(16)}`,
+        },
+      }),
+    ],
+    autofocus: true,
+  });
+
+  // Initialize Yjs and WebSocket connection
+  useEffect(() => {
+    if (!id || !editor) return;
+
+    // Initialize Yjs document
+    ydoc.current = new Y.Doc();
+    
+    // Connect to WebSocket provider
+    provider.current = new WebsocketProvider(
+      'ws://localhost:1234',
+      id,
+      ydoc.current
+    );
+
+    provider.current.on('status', event => {
+      setStatus(event.status);
+    });
+
+    // Update editor extensions with new Yjs document
+    editor.setOptions({
+      extensions: [
+        StarterKit.configure({
+          history: false,
+        }),
+        Collaboration.configure({
+          document: ydoc.current,
+          field: 'content',
+        }),
+        CollaborationCursor.configure({
+          provider: provider.current,
+          user: {
+            name: localStorage.getItem('username') || 'Anonymous',
+            color: `#${Math.floor(Math.random()*16777215).toString(16)}`,
+          },
+        }),
+      ],
+    });
+
+    // Cleanup on unmount
+    return () => {
+      provider.current?.destroy();
+      ydoc.current?.destroy();
+    };
+  }, [id, editor]);
+
+  // Redirect if no document ID
+  useEffect(() => {
+    if (!id) {
+      navigate('/');
+      return;
+    }
+  }, [id, navigate]);
 
   // Load document content
   useEffect(() => {
     const loadDocument = async () => {
       try {
-        const response = await fetch(`http://localhost:5000/documents/${id}`, {
+        const response = await fetch(`${API_BASE_URL}/documents/${id}`, {
           headers: {
-            'Authorization': `Bearer ${getToken()}`
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
           }
         });
 
         if (!response.ok) {
+          if (response.status === 404) {
+            setError('Document not found');
+            setTimeout(() => navigate('/'), 2000);
+            return;
+          }
           throw new Error('Failed to load document');
         }
 
         const data = await response.json();
-        setTitle(data.document.title);
+        setTitle(data.document.title || 'Untitled Document');
         
-        // Convert the stored content back to EditorState
-        if (data.document.content) {
+        // If there's content, set it in the editor
+        if (data.document.content && editor) {
           const content = JSON.parse(data.document.content);
-          const contentState = convertFromRaw(content);
-          setEditorState(EditorState.createWithContent(contentState));
+          editor.commands.setContent(content);
         }
       } catch (err) {
         console.error('Error loading document:', err);
@@ -47,26 +143,26 @@ const TextEditor = () => {
       }
     };
 
-    if (id) {
+    if (id && editor) {
       loadDocument();
     }
-  }, [id]);
+  }, [id, editor, navigate]);
 
   // Save document content
   const saveDocument = async () => {
+    if (!editor || !id) return;
+    
     setSaving(true);
     try {
-      const content = convertToRaw(editorState.getCurrentContent());
-      
-      const response = await fetch(`http://localhost:5000/documents/${id}`, {
+      const response = await fetch(`${API_BASE_URL}/documents/${id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${getToken()}`
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
         },
         body: JSON.stringify({
           title,
-          content: JSON.stringify(content)
+          content: JSON.stringify(editor.getJSON())
         })
       });
 
@@ -84,65 +180,43 @@ const TextEditor = () => {
 
   // Auto-save when content changes
   useEffect(() => {
+    if (!editor || !id) return;
+
     const timeoutId = setTimeout(() => {
-      if (id) {
-        saveDocument();
-      }
+      saveDocument();
     }, 1000);
 
     return () => clearTimeout(timeoutId);
-  }, [editorState, title]);
+  }, [editor?.getHTML(), title]);
 
-  // Handle keyboard shortcuts
-  const handleKeyCommand = (command) => {
-    const newState = RichUtils.handleKeyCommand(editorState, command);
-    if (newState) {
-      setEditorState(newState);
-      return 'handled';
-    }
-    return 'not-handled';
-  };
+  if (!id) {
+    return null;
+  }
 
-  // Style buttons
-  const StyleButton = ({ style, icon, active }) => {
+  if (!editor) {
     return (
-      <button
-        className={`p-2 mx-1 rounded ${
-          active ? 'bg-gray-200' : 'hover:bg-gray-100'
-        }`}
-        onMouseDown={(e) => {
-          e.preventDefault();
-          setEditorState(RichUtils.toggleInlineStyle(editorState, style));
-        }}
-      >
-        {icon}
-      </button>
+      <div className="flex h-screen">
+        <Sidebar />
+        <div className="flex-1 flex flex-col">
+          <Topbar />
+          <div className="flex-1 bg-white flex items-center justify-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+          </div>
+        </div>
+      </div>
     );
-  };
+  }
 
-  // Block type buttons
-  const BlockButton = ({ block, icon, active }) => {
-    return (
-      <button
-        className={`p-2 mx-1 rounded ${
-          active ? 'bg-gray-200' : 'hover:bg-gray-100'
-        }`}
-        onMouseDown={(e) => {
-          e.preventDefault();
-          setEditorState(RichUtils.toggleBlockType(editorState, block));
-        }}
-      >
-        {icon}
-      </button>
-    );
-  };
-
-  const currentStyle = editorState.getCurrentInlineStyle();
-  const selection = editorState.getSelection();
-  const blockType = editorState
-    .getCurrentContent()
-    .getBlockForKey(selection.getStartKey())
-    .getType();
+  const MenuButton = ({ onClick, active, children }) => (
+    <button
+      onClick={onClick}
+      className={`p-2 mx-1 rounded transition-colors ${
+        active ? 'bg-gray-200' : 'hover:bg-gray-100'
+      }`}
+    >
+      {children}
+    </button>
+  );
 
   return (
     <div className="flex h-screen">
@@ -162,67 +236,90 @@ const TextEditor = () => {
           </div>
 
           {/* Toolbar */}
-          <div className="border-b border-gray-200 p-2 flex items-center">
-            <StyleButton
-              style="BOLD"
-              icon="B"
-              active={currentStyle.has('BOLD')}
-            />
-            <StyleButton
-              style="ITALIC"
-              icon="I"
-              active={currentStyle.has('ITALIC')}
-            />
-            <StyleButton
-              style="UNDERLINE"
-              icon="U"
-              active={currentStyle.has('UNDERLINE')}
-            />
+          <div className="border-b border-gray-200 p-2 flex items-center flex-wrap">
+            <MenuButton
+              onClick={() => editor.chain().focus().toggleBold().run()}
+              active={editor.isActive('bold')}
+            >
+              <FaBold />
+            </MenuButton>
+            <MenuButton
+              onClick={() => editor.chain().focus().toggleItalic().run()}
+              active={editor.isActive('italic')}
+            >
+              <FaItalic />
+            </MenuButton>
+            <MenuButton
+              onClick={() => editor.chain().focus().toggleStrike().run()}
+              active={editor.isActive('strike')}
+            >
+              <FaUnderline />
+            </MenuButton>
+            
             <div className="mx-2 h-6 w-px bg-gray-200" />
-            <BlockButton
-              block="header-one"
-              icon="H1"
-              active={blockType === 'header-one'}
-            />
-            <BlockButton
-              block="header-two"
-              icon="H2"
-              active={blockType === 'header-two'}
-            />
-            <BlockButton
-              block="unordered-list-item"
-              icon="•"
-              active={blockType === 'unordered-list-item'}
-            />
-            <BlockButton
-              block="ordered-list-item"
-              icon="1."
-              active={blockType === 'ordered-list-item'}
-            />
+            
+            <MenuButton
+              onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
+              active={editor.isActive('heading', { level: 1 })}
+            >
+              <FaHeading />
+            </MenuButton>
+            <MenuButton
+              onClick={() => editor.chain().focus().toggleBulletList().run()}
+              active={editor.isActive('bulletList')}
+            >
+              <FaListUl />
+            </MenuButton>
+            <MenuButton
+              onClick={() => editor.chain().focus().toggleOrderedList().run()}
+              active={editor.isActive('orderedList')}
+            >
+              <FaListOl />
+            </MenuButton>
+            
+            <div className="mx-2 h-6 w-px bg-gray-200" />
+            
+            <MenuButton
+              onClick={() => editor.chain().focus().toggleBlockquote().run()}
+              active={editor.isActive('blockquote')}
+            >
+              <FaQuoteLeft />
+            </MenuButton>
+            <MenuButton
+              onClick={() => editor.chain().focus().toggleCodeBlock().run()}
+              active={editor.isActive('codeBlock')}
+            >
+              <FaCode />
+            </MenuButton>
+            
+            <div className="mx-2 h-6 w-px bg-gray-200" />
+            
+            <MenuButton onClick={() => editor.chain().focus().undo().run()}>
+              <FaUndo />
+            </MenuButton>
+            <MenuButton onClick={() => editor.chain().focus().redo().run()}>
+              <FaRedo />
+            </MenuButton>
           </div>
 
           {/* Editor */}
-          <div 
-            className="p-8 max-w-4xl mx-auto"
-            onClick={() => editorRef.current?.focus()}
-          >
+          <div className="p-8 max-w-4xl mx-auto">
             {error ? (
               <div className="text-red-500">{error}</div>
             ) : (
-              <Editor
-                ref={editorRef}
-                editorState={editorState}
-                onChange={setEditorState}
-                handleKeyCommand={handleKeyCommand}
-                placeholder="Start typing..."
-              />
+              <EditorContent editor={editor} className="prose max-w-none" />
             )}
           </div>
 
-          {/* Save status */}
-          <div className="fixed bottom-4 right-4">
+          {/* Status */}
+          <div className="fixed bottom-4 right-4 flex items-center space-x-4">
+            <span className={`inline-block w-2 h-2 rounded-full ${
+              status === 'connected' ? 'bg-green-500' : 'bg-yellow-500'
+            }`} />
             <span className="text-sm text-gray-500">
-              {saving ? 'Saving...' : 'All changes saved'}
+              {status === 'connected' ? 
+                (saving ? 'Saving...' : 'All changes saved') : 
+                'Connecting...'}
             </span>
           </div>
         </div>
