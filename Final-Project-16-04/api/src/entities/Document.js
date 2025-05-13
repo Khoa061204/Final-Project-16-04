@@ -17,7 +17,7 @@ module.exports = new EntitySchema({
     },
     content: {
       type: "text",
-      default: "{}"
+      nullable: true
     },
     userId: {
       type: "uuid"

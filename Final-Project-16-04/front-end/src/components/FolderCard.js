@@ -1,20 +1,52 @@
-import React from "react";
+import React from 'react';
+import PropTypes from 'prop-types';
 
-const FolderCard = ({ title, size, items }) => {
+const FolderCard = ({ 
+  title, 
+  size, 
+  items,
+  onClick,
+  className = ''
+}) => {
   return (
-    <div className="bg-white rounded-lg shadow overflow-hidden cursor-pointer hover:shadow-md transition-all">
-      {/* Thumbnail area */}
-      <div className="h-32 bg-gray-100 flex items-center justify-center">
-        <span className="text-4xl text-gray-400">📁</span>
+    <button
+      type="button"
+      className={`
+        bg-white 
+        rounded-lg 
+        p-4 
+        shadow-sm 
+        hover:shadow-md 
+        transition-shadow 
+        duration-200 
+        w-full
+        text-left
+        ${className}
+      `}
+      onClick={onClick}
+    >
+      <div className="flex items-center mb-3">
+        <span className="text-2xl mr-3" role="img" aria-label="folder">
+          📁
+        </span>
+        <h3 className="font-medium text-gray-900 truncate">
+          {title}
+        </h3>
       </div>
-      
-      {/* Content area */}
-      <div className="p-3">
-        <h3 className="font-medium text-gray-900">{title}</h3>
-        <p className="text-sm text-gray-500">{size} • {items}</p>
+      <div className="text-sm text-gray-500">
+        <p className="mb-1">{size}</p>
+        <p>{items}</p>
       </div>
-    </div>
+    </button>
   );
+};
+
+FolderCard.propTypes = {
+  title: PropTypes.string.isRequired,
+  size: PropTypes.string.isRequired,
+  items: PropTypes.string.isRequired,
+  onClick: PropTypes.func,
+  className: PropTypes.string
 };
 
 export default FolderCard;

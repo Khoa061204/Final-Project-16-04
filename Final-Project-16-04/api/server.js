@@ -12,6 +12,8 @@ const AppDataSource = require("./data-source");
 const User = require("./src/entities/User.js");
 // Add Document entity import
 const Document = require("./src/entities/Document.js");
+const documentRouter = require("./routes/document");
+const nodemailer = require("nodemailer");
 
 const app = express();
 app.use(express.json());
@@ -54,6 +56,27 @@ const s3 = new S3Client({
 // ✅ Multer Setup (Memory Storage)
 const upload = multer({ storage: multer.memoryStorage() });
 
+// Create a transporter for sending emails
+const transporter = nodemailer.createTransport(
+  process.env.EMAIL_SERVICE
+    ? {
+        service: process.env.EMAIL_SERVICE,
+        auth: {
+          user: process.env.EMAIL_USER,
+          pass: process.env.EMAIL_PASSWORD
+        }
+      }
+    : {
+        host: process.env.EMAIL_HOST,
+        port: parseInt(process.env.EMAIL_PORT, 10),
+        secure: process.env.EMAIL_SECURE === 'true',
+        auth: {
+          user: process.env.EMAIL_USER,
+          pass: process.env.EMAIL_PASSWORD
+        }
+      }
+);
+
 // ✅ Authentication Middleware
 const authenticate = async (req, res, next) => {
   try {
@@ -79,8 +102,56 @@ const authenticate = async (req, res, next) => {
 };
 
 /* ================================
+        🏥 HEALTH CHECK
+================================ */
+
+app.get("/health", (req, res) => {
+  res.json({ status: "ok", message: "Server is running" });
+});
+
+/* ================================
         🟢 AUTHENTICATION ROUTES
 ================================ */
+
+// Token verification endpoint
+app.get("/verify-token", async (req, res) => {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+    
+    if (!token) {
+      return res.status(401).json({ 
+        status: "error", 
+        message: "No token provided" 
+      });
+    }
+    
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const userRepo = AppDataSource.getRepository(User);
+    const user = await userRepo.findOne({ where: { id: decoded.id } });
+    
+    if (!user) {
+      return res.status(401).json({ 
+        status: "error", 
+        message: "Invalid token" 
+      });
+    }
+    
+    return res.json({ 
+      status: "ok", 
+      user: { 
+        id: user.id, 
+        email: user.email, 
+        username: user.username 
+      } 
+    });
+  } catch (error) {
+    return res.status(401).json({ 
+      status: "error", 
+      message: "Token verification failed", 
+      error: error.message 
+    });
+  }
+});
 
 // ✅ Register User
 app.post("/register", async (req, res) => {
@@ -128,9 +199,17 @@ app.post("/login", async (req, res) => {
     }
 
     // Generate JWT token
-    const token = jwt.sign({ id: user.id, email: user.email }, process.env.JWT_SECRET, { expiresIn: "1h" });
+    const token = jwt.sign(
+      { id: user.id, email: user.email }, 
+      process.env.JWT_SECRET, 
+      { expiresIn: "1h" }
+    );
 
-    res.json({ message: "✅ Login successful", token, user: { id: user.id, username: user.username, email: user.email } });
+    res.json({ 
+      message: "✅ Login successful", 
+      token, 
+      user: { id: user.id, username: user.username, email: user.email } 
+    });
   } catch (error) {
     console.error("❌ Login error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
@@ -154,11 +233,67 @@ app.post("/request-reset", async (req, res) => {
     const token = crypto.randomBytes(32).toString("hex");
     resetTokens[email] = token; // Store token in memory
 
-    console.log(`🔵 Reset token for ${email}: ${token}`); // Normally, send this via email
+    // Create reset link
+    const resetLink = `http://localhost:3000/reset-password?token=${token}&email=${email}`;
 
-    res.json({ message: "✅ Reset link sent! Check your email." });
+    // Email content
+    const mailOptions = {
+      from: '"Password Reset" <noreply@example.com>',
+      to: email,
+      subject: 'Password Reset Request',
+      html: `
+        <h1>Password Reset Request</h1>
+        <p>You requested a password reset. Click the link below to reset your password:</p>
+        <a href="${resetLink}">Reset Password</a>
+        <p>This link will expire in 1 hour.</p>
+        <p>If you didn't request this, please ignore this email.</p>
+      `
+    };
+
+    // Send email
+    const info = await transporter.sendMail(mailOptions);
+    console.log('✅ Reset email sent:', nodemailer.getTestMessageUrl(info));
+
+    res.json({ 
+      message: "✅ Reset link sent! Check your email.",
+      previewUrl: nodemailer.getTestMessageUrl(info) // This will be logged in the console
+    });
   } catch (error) {
     console.error("❌ Reset request error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+// ✅ Reset Password
+app.post("/reset-password", async (req, res) => {
+  const { token, email, newPassword } = req.body;
+
+  try {
+    // Validate token
+    if (resetTokens[email] !== token) {
+      return res.status(400).json({ message: "❌ Invalid or expired token" });
+    }
+
+    const userRepo = AppDataSource.getRepository(User);
+    const user = await userRepo.findOne({ where: { email } });
+
+    if (!user) {
+      return res.status(400).json({ message: "❌ User not found" });
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Update password
+    user.password = hashedPassword;
+    await userRepo.save(user);
+
+    // Remove used token
+    delete resetTokens[email];
+
+    res.json({ message: "✅ Password updated successfully" });
+  } catch (error) {
+    console.error("❌ Password reset error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 });
@@ -200,131 +335,8 @@ app.post("/upload", upload.single("file"), async (req, res) => {
         📄 DOCUMENT ROUTES
 ================================ */
 
-// Create document
-app.post("/documents", authenticate, async (req, res) => {
-  const { title } = req.body;
-  
-  try {
-    const documentRepo = AppDataSource.getRepository(Document);
-    
-    const newDocument = documentRepo.create({
-      title: title || "Untitled Document",
-      content: JSON.stringify({ blocks: [] }),
-      userId: req.user.id,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    });
-    
-    await documentRepo.save(newDocument);
-    
-    res.status(201).json({ 
-      message: "✅ Document created successfully", 
-      document: newDocument 
-    });
-  } catch (error) {
-    console.error("❌ Document creation error:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
-  }
-});
-
-// Get all documents for a user
-app.get("/documents", authenticate, async (req, res) => {
-  try {
-    const documentRepo = AppDataSource.getRepository(Document);
-    
-    const documents = await documentRepo.find({
-      where: { userId: req.user.id },
-      select: ["id", "title", "createdAt", "updatedAt"]
-    });
-    
-    res.json({ documents });
-  } catch (error) {
-    console.error("❌ Get documents error:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
-  }
-});
-
-// Get document by id
-app.get("/documents/:id", authenticate, async (req, res) => {
-  try {
-    const documentRepo = AppDataSource.getRepository(Document);
-    
-    const document = await documentRepo.findOne({
-      where: { 
-        id: req.params.id,
-        userId: req.user.id 
-      }
-    });
-    
-    if (!document) {
-      return res.status(404).json({ message: "❌ Document not found" });
-    }
-    
-    res.json({ document });
-  } catch (error) {
-    console.error("❌ Get document error:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
-  }
-});
-
-// Update document
-app.put("/documents/:id", authenticate, async (req, res) => {
-  const { title, content } = req.body;
-  
-  try {
-    const documentRepo = AppDataSource.getRepository(Document);
-    
-    let document = await documentRepo.findOne({
-      where: { 
-        id: req.params.id,
-        userId: req.user.id 
-      }
-    });
-    
-    if (!document) {
-      return res.status(404).json({ message: "❌ Document not found" });
-    }
-    
-    document.title = title || document.title;
-    if (content) document.content = content;
-    document.updatedAt = new Date();
-    
-    await documentRepo.save(document);
-    
-    res.json({ 
-      message: "✅ Document updated successfully", 
-      document 
-    });
-  } catch (error) {
-    console.error("❌ Update document error:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
-  }
-});
-
-// Delete document
-app.delete("/documents/:id", authenticate, async (req, res) => {
-  try {
-    const documentRepo = AppDataSource.getRepository(Document);
-    
-    const document = await documentRepo.findOne({
-      where: { 
-        id: req.params.id,
-        userId: req.user.id 
-      }
-    });
-    
-    if (!document) {
-      return res.status(404).json({ message: "❌ Document not found" });
-    }
-    
-    await documentRepo.remove(document);
-    
-    res.json({ message: "✅ Document deleted successfully" });
-  } catch (error) {
-    console.error("❌ Delete document error:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
-  }
-});
+// Use document router
+app.use("/documents", documentRouter);
 
 /* ================================
         🔄 SOCKET.IO SETUP
