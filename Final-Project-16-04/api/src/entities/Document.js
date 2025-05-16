@@ -16,7 +16,7 @@ module.exports = new EntitySchema({
       default: "Untitled Document"
     },
     content: {
-      type: "text",
+      type: "longtext",
       nullable: true
     },
     s3Key: {

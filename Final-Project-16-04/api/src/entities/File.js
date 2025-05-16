@@ -28,6 +28,11 @@ module.exports = new EntitySchema({
       nullable: false,
       default: () => "CURRENT_TIMESTAMP(6)",
     },
+    folder_id: {
+      type: "char",
+      length: 36,
+      nullable: true,
+    },
   },
   relations: {
     user: {
@@ -37,6 +42,14 @@ module.exports = new EntitySchema({
         name: "user_id"
       },
       onDelete: "CASCADE"
+    },
+    folder: {
+      type: "many-to-one",
+      target: "Folder",
+      joinColumn: {
+        name: "folder_id"
+      },
+      onDelete: "SET NULL"
     }
   }
 }); 

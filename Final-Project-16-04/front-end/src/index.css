@@ -16,4 +16,37 @@ code {
     monospace;
 }
 
+input[placeholder="Untitled Document"] {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  appearance: none !important;
+  background: transparent !important;
+}
+
+[contenteditable="true"]:focus {
+  outline: none !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.tiptap-page {
+  width: 794px; /* A4 width at 96dpi */
+  min-height: 1123px; /* A4 height at 96dpi */
+  margin: 2rem auto;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  padding: 2rem 2.5rem;
+  position: relative;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+.tiptap-paged-editor {
+  background: #f3f4f6;
+  min-height: 100vh;
+  padding: 2rem 0;
+}
+
 

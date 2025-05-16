@@ -15,7 +15,7 @@ const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const multer = require("multer");
-const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
+const { S3Client, PutObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
 const http = require("http"); // Added for Socket.IO
 const socketIo = require("socket.io"); // Added for Socket.IO
 const AppDataSource = require("./data-source");
@@ -28,19 +28,17 @@ const File = require("./src/entities/File.js");
 const Folder = require("./src/entities/Folder.js");
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '20mb' }));
+app.use(express.urlencoded({ limit: '20mb', extended: true }));
 
 // Create HTTP server for Socket.IO
 const server = http.createServer(app);
 
 // ✅ CORS Configuration
-app.use(
-  cors({
-    origin: ["http://localhost:3000"], // Add more origins if needed
-    methods: "GET, POST, PUT, DELETE", // Added PUT, DELETE for document operations
-    credentials: true,
-  })
-);
+app.use(cors({
+  origin: 'http://localhost:3000',
+  credentials: true
+}));
 
 // Initialize Socket.IO with CORS
 const io = socketIo(server, {
@@ -714,6 +712,115 @@ app.get("/folders/:folderId/files", authenticate, async (req, res) => {
     res.json({ files: filesWithUrls });
   } catch (error) {
     console.error("❌ Get folder files error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+// ✅ Update file's folder (move file to folder)
+app.put('/files/:id', authenticate, async (req, res) => {
+  try {
+    const { folder_id } = req.body;
+    const fileRepo = AppDataSource.getRepository(File);
+    const file = await fileRepo.findOne({ where: { id: req.params.id, user_id: req.user.id } });
+    if (!file) return res.status(404).json({ message: 'File not found' });
+    file.folder_id = folder_id;
+    await fileRepo.save(file);
+    res.json({ message: 'File moved', file });
+  } catch (error) {
+    console.error('❌ Move file error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// ✅ Delete a file
+app.delete("/files/:id", authenticate, async (req, res) => {
+  try {
+    const fileRepo = AppDataSource.getRepository(File);
+    const file = await fileRepo.findOne({ where: { id: req.params.id, user_id: req.user.id } });
+    if (!file) return res.status(404).json({ message: "File not found" });
+
+    // Delete from S3 first
+    if (file.s3Key) {
+      const deleteParams = {
+        Bucket: process.env.REACT_APP_AWS_BUCKET_NAME,
+        Key: file.s3Key
+      };
+      try {
+        await s3.send(new DeleteObjectCommand(deleteParams));
+      } catch (s3Error) {
+        console.error("❌ S3 delete error:", s3Error);
+        return res.status(500).json({ message: "Failed to delete file from S3", error: s3Error.message });
+      }
+    }
+
+    await fileRepo.remove(file);
+    res.json({ message: "File deleted" });
+  } catch (error) {
+    console.error("❌ Delete file error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+// ✅ Delete a folder
+app.delete("/folders/:id", authenticate, async (req, res) => {
+  try {
+    const folderRepo = AppDataSource.getRepository(Folder);
+    const folder = await folderRepo.findOne({ where: { id: req.params.id, user_id: req.user.id } });
+    if (!folder) return res.status(404).json({ message: "Folder not found" });
+    await folderRepo.remove(folder);
+    res.json({ message: "Folder deleted" });
+  } catch (error) {
+    console.error("❌ Delete folder error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+// Add this after your other routes and after authentication middleware
+app.get("/all-files", authenticate, async (req, res) => {
+  try {
+    const fileRepo = AppDataSource.getRepository(File);
+    const documentRepo = AppDataSource.getRepository(Document);
+
+    // Get all files for the user
+    const files = await fileRepo.find({
+      where: { user_id: req.user.id },
+      order: { uploaded_at: "DESC" }
+    });
+
+    // Get all documents for the user
+    const documents = await documentRepo.find({
+      where: { userId: req.user.id },
+      order: { createdAt: "DESC" }
+    });
+
+    // Normalize files
+    const normalizedFiles = files.map(file => ({
+      id: file.id,
+      name: file.file_name,
+      url: file.file_url,
+      folder_id: file.folder_id,
+      createdAt: file.uploaded_at,
+      type: "file"
+    }));
+
+    // Normalize documents
+    const normalizedDocuments = documents.map(doc => ({
+      id: doc.id,
+      name: doc.title,
+      url: null, // or doc.s3Key if you want to provide a download link
+      folder_id: null, // or add folder support if you have it
+      createdAt: doc.createdAt,
+      type: "document"
+    }));
+
+    // Merge and sort by createdAt DESC
+    const allItems = [...normalizedFiles, ...normalizedDocuments].sort(
+      (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+    );
+
+    res.json({ items: allItems });
+  } catch (error) {
+    console.error("❌ Get all files and documents error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 });

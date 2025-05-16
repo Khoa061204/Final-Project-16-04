@@ -94,6 +94,7 @@ function App() {
           {/* Protected routes */}
           <Route path="/" element={authState.isAuthenticated ? <Home /> : <Navigate to="/login" />} />
           <Route path="/home" element={authState.isAuthenticated ? <Home /> : <Navigate to="/login" />} />
+          <Route path="/folders/:folderId" element={authState.isAuthenticated ? <Home /> : <Navigate to="/login" />} />
           <Route path="/upload" element={authState.isAuthenticated ? <UploadFile /> : <Navigate to="/login" />} />
           <Route path="/documents/:id" element={authState.isAuthenticated ? <TextEditor /> : <Navigate to="/login" />} />
           

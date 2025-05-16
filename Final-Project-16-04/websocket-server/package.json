@@ -1,0 +1,16 @@
+{
+  "name": "websocket-server",
+  "version": "1.0.0",
+  "description": "WebSocket server for collaborative text editing",
+  "main": "server.js",
+  "scripts": {
+    "start": "y-websocket --port 1234"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "ws": "^8.16.0",
+    "y-websocket": "^1.5.4"
+  }
+} 

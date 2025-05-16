@@ -1,10 +1,28 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import Sidebar from "../components/Sidebar";
 import Topbar from "../components/Topbar";
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+
+const ALLOWED_EXTENSIONS = [
+  // Text files
+  '.txt', '.md', '.markdown', '.rst', '.text',
+  // Code files
+  '.js', '.jsx', '.ts', '.tsx', '.py', '.java', '.c', '.cpp', '.cs', '.php', '.rb', '.go', '.rs', '.swift', '.kt', '.dart',
+  // Web files
+  '.html', '.htm', '.css', '.scss', '.sass', '.less', '.json', '.xml', '.yaml', '.yml',
+  // Data files
+  '.csv', '.tsv', '.sql',
+  // Config files
+  '.env', '.config', '.ini', '.conf',
+  // Shell scripts
+  '.sh', '.bash', '.zsh', '.bat', '.cmd', '.ps1',
+  // PDF files
+  '.pdf',
+  // Image files
+  '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg'
+];
 
 function UploadFile() {
   const navigate = useNavigate();
@@ -16,15 +34,7 @@ function UploadFile() {
   const [selectedFolder, setSelectedFolder] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const [isFoldersLoading, setIsFoldersLoading] = useState(true);
-
-  // Configure AWS S3 client
-  const s3Client = new S3Client({
-    region: process.env.REACT_APP_AWS_REGION,
-    credentials: {
-      accessKeyId: process.env.REACT_APP_AWS_ACCESS_KEY_ID,
-      secretAccessKey: process.env.REACT_APP_AWS_SECRET_ACCESS_KEY,
-    },
-  });
+  const [fileType, setFileType] = useState('text'); // 'text', 'binary', or 'image'
 
   // Fetch folders on mount
   useEffect(() => {
@@ -50,7 +60,17 @@ function UploadFile() {
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0];
     if (selectedFile) {
+      const extension = selectedFile.name.substring(selectedFile.name.lastIndexOf('.')).toLowerCase();
+      if (!ALLOWED_EXTENSIONS.includes(extension)) {
+        setMessage("❌ Unsupported file type. Please select a supported file.");
+        setFile(null);
+        return;
+      }
+      let type = 'text';
+      if (extension === '.pdf') type = 'binary';
+      if (['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg'].includes(extension)) type = 'image';
       setFile(selectedFile);
+      setFileType(type);
       setMessage("");
       setProgress(0);
     }
@@ -62,7 +82,17 @@ function UploadFile() {
     
     const droppedFile = e.dataTransfer.files[0];
     if (droppedFile) {
+      const extension = droppedFile.name.substring(droppedFile.name.lastIndexOf('.')).toLowerCase();
+      if (!ALLOWED_EXTENSIONS.includes(extension)) {
+        setMessage("❌ Unsupported file type. Please select a supported file.");
+        setFile(null);
+        return;
+      }
+      let type = 'text';
+      if (extension === '.pdf') type = 'binary';
+      if (['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg'].includes(extension)) type = 'image';
       setFile(droppedFile);
+      setFileType(type);
       setMessage("");
       setProgress(0);
     }
@@ -85,37 +115,99 @@ function UploadFile() {
     }
 
     setLoading(true);
-    setMessage("Uploading to AWS S3...");
+    setMessage("Reading file...");
     setProgress(10);
 
-    const formData = new FormData();
-    formData.append("file", file);
-    if (selectedFolder) formData.append("folder_id", selectedFolder);
-
     try {
-      const response = await fetch(`${API_BASE_URL}/upload`, {
+      let fileContent;
+      let body;
+
+      if (fileType === 'binary') {
+        // Handle PDF files
+        fileContent = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = e => resolve(e.target.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(file); // Read as base64
+        });
+        body = {
+          title: file.name,
+          type: 'pdf',
+          pdfUrl: fileContent
+        };
+      } else if (fileType === 'image') {
+        // Handle image files
+        fileContent = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = e => resolve(e.target.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(file); // Read as base64
+        });
+        body = {
+          title: file.name,
+          type: 'image',
+          imageUrl: fileContent
+        };
+      } else {
+        // Handle text files
+        fileContent = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = e => resolve(e.target.result);
+          reader.onerror = reject;
+          reader.readAsText(file);
+        });
+        body = {
+          title: file.name,
+          type: 'text',
+          content: {
+            type: 'doc',
+            content: [
+              { 
+                type: 'paragraph', 
+                content: [{ 
+                  type: 'text', 
+                  text: fileContent,
+                  marks: [{ type: 'code', attrs: { language: file.name.split('.').pop() } }]
+                }] 
+              }
+            ]
+          }
+        };
+      }
+
+      if (selectedFolder) {
+        body.folder_id = selectedFolder;
+      }
+
+      setProgress(40);
+      setMessage("Uploading document...");
+
+      const response = await fetch(`${API_BASE_URL}/documents`, {
         method: "POST",
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json'
         },
-        body: formData
+        body: JSON.stringify(body)
       });
-      
-      setProgress(70);
-      
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: 'Network error' }));
+        throw new Error(errorData.message || 'Upload failed');
+      }
+
+      setProgress(80);
       const data = await response.json();
-      if (!response.ok) throw new Error(data.message || 'Upload failed');
       
       setProgress(100);
-      setMessage("✅ File uploaded successfully!");
-      setFile(null); // Reset file after successful upload
-      
-      // Reset progress after a delay
-      setTimeout(() => {
-        setProgress(0);
-      }, 2000);
+      setMessage("✅ Document uploaded successfully!");
+      setFile(null);
+      setTimeout(() => setProgress(0), 1000);
+      // Redirect to Home after short delay
+      setTimeout(() => navigate('/'), 1200);
     } catch (error) {
-      setMessage(`❌ Upload failed: ${error.message}`);
+      console.error('Upload error:', error);
+      setMessage(`❌ Upload failed: ${error.message || 'Network error. Please try again.'}`);
       setProgress(0);
     } finally {
       setLoading(false);
@@ -131,7 +223,7 @@ function UploadFile() {
           <div className="max-w-2xl mx-auto">
             <div className="bg-white p-8 rounded-xl shadow-lg">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-gray-800">Upload File</h2>
+                <h2 className="text-2xl font-bold text-gray-800">Upload File as Document</h2>
                 <button 
                   onClick={() => navigate(-1)}
                   className="text-gray-600 hover:text-gray-800 flex items-center"
@@ -191,7 +283,7 @@ function UploadFile() {
               >
                 <input
                   type="file"
-                  accept=".txt,.md,.js,.py,.java,.c,.cpp,.json,.html,.css,.ts,.tsx,.jsx,.csv,.xml,.sh,.bat,.php,.rb,.go,.rs,.swift,.kt,.dart,.sql,.yml,.yaml"
+                  accept={ALLOWED_EXTENSIONS.join(',')}
                   onChange={handleFileChange}
                   disabled={loading}
                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
@@ -208,7 +300,7 @@ function UploadFile() {
                     <p className="pl-1">or drag and drop</p>
                   </div>
                   <p className="text-xs text-gray-500">
-                    Text files only (TXT, MD, JS, PY, etc.)
+                    Supported files: Text, Code, Web, Data, Config, Shell scripts, and PDFs
                   </p>
                 </div>
 

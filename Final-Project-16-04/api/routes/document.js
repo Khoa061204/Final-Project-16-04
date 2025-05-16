@@ -112,13 +112,11 @@ router.post("/", authenticate, async (req, res) => {
 router.get("/", authenticate, async (req, res) => {
   try {
     const documentRepo = AppDataSource.getRepository(Document);
-    
     const documents = await documentRepo.find({
       where: { userId: req.user.id },
       select: ["id", "title", "createdAt", "updatedAt"]
     });
-    
-    res.json({ documents });
+    res.status(200).json({ documents });
   } catch (error) {
     console.error("❌ Get documents error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
