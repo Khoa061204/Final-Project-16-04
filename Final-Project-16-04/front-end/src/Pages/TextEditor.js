@@ -1,6 +1,6 @@
 // front-end/src/Pages/TextEditor.js
 import React, { useState, useEffect, useRef } from 'react';
-import { useEditor, EditorContent } from '@tiptap/react';
+import { EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Collaboration from '@tiptap/extension-collaboration';
 import CollaborationCursor from '@tiptap/extension-collaboration-cursor';
@@ -12,7 +12,6 @@ import Topbar from '../components/Topbar';
 import {
   FaBold,
   FaItalic,
-  FaUnderline,
   FaListUl,
   FaListOl,
   FaQuoteLeft,
@@ -20,12 +19,35 @@ import {
   FaUndo,
   FaHeading,
   FaCode,
+  FaStrikethrough,
+  FaAlignLeft,
+  FaAlignCenter,
+  FaAlignRight,
+  FaAlignJustify,
+  FaSubscript,
+  FaSuperscript,
+  FaIndent,
+  FaOutdent,
+  FaLink,
+  FaUnlink,
+  FaTable,
+  FaImage,
 } from 'react-icons/fa';
 import { Editor } from '@tiptap/core';
 import Page from '../components/Page';
 import PagedEditor from './PagedEditor';
 import Highlight from '@tiptap/extension-highlight';
 import TextStyle from '@tiptap/extension-text-style';
+import TextAlign from '@tiptap/extension-text-align';
+import Subscript from '@tiptap/extension-subscript';
+import Superscript from '@tiptap/extension-superscript';
+import Link from '@tiptap/extension-link';
+import Image from '@tiptap/extension-image';
+import Table from '@tiptap/extension-table';
+import TableRow from '@tiptap/extension-table-row';
+import TableCell from '@tiptap/extension-table-cell';
+import TableHeader from '@tiptap/extension-table-header';
+import CollabUserList from '../components/CollabUserList';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
@@ -42,6 +64,7 @@ const TextEditor = () => {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
+  // Initialize Yjs document and provider
   useEffect(() => {
     if (!id) return;
 
@@ -52,34 +75,62 @@ const TextEditor = () => {
 
     provider.on('status', event => {
       setStatus(event.status);
-      if (event.status === 'connected') {
-        const newEditor = new Editor({
-          extensions: [
-            StarterKit.configure({ history: false }),
-            Collaboration.configure({ document: ydoc, field: 'content' }),
-            CollaborationCursor.configure({
-              provider,
-              user: {
-                name: localStorage.getItem('username') || 'Anonymous',
-                color: `#${Math.floor(Math.random()*16777215).toString(16)}`,
-              },
-            }),
-            Highlight,
-            TextStyle,
-          ],
-          autofocus: true,
-        });
-        setEditor(newEditor);
-      }
     });
 
     return () => {
       provider.destroy();
       ydoc.destroy();
-      if (editor) editor.destroy();
     };
-    // eslint-disable-next-line
   }, [id]);
+
+  // Initialize editor when provider is connected
+  useEffect(() => {
+    if (status !== 'connected' || !ydocRef.current || !providerRef.current) return;
+
+    const newEditor = new Editor({
+      extensions: [
+        StarterKit,
+        TextStyle,
+        Subscript,
+        Superscript,
+        Link,
+        Image,
+        Table.configure({ resizable: true }),
+        TableRow,
+        TableCell,
+        TableHeader,
+        Collaboration.configure({
+          document: ydocRef.current,
+        }),
+        CollaborationCursor.configure({
+          provider: providerRef.current,
+          user: {
+            name: localStorage.getItem('username') || 'Anonymous',
+            color: '#' + Math.floor(Math.random()*16777215).toString(16),
+          },
+        }),
+        Highlight,
+        TextAlign.configure({
+          types: ['heading', 'paragraph'],
+        }),
+      ],
+      editorProps: {
+        attributes: {
+          class: 'prose prose-sm sm:prose lg:prose-lg xl:prose-2xl mx-auto focus:outline-none',
+        },
+      },
+      content: document?.content,
+      editable: true,
+    });
+
+    setEditor(newEditor);
+
+    return () => {
+      if (newEditor) {
+        newEditor.destroy();
+      }
+    };
+  }, [status, document?.content]);
 
   // Load document content
   useEffect(() => {
@@ -106,7 +157,24 @@ const TextEditor = () => {
         // If there's content and editor is ready, set the content
         if (data.document.content && editor) {
           try {
-            const content = JSON.parse(data.document.content);
+            let content = data.document.content;
+            if (typeof content === 'string') {
+              content = JSON.parse(content);
+            }
+            // Defensive clean: strip 'attrs' from 'text' nodes
+            const cleanTextNodeAttrs = (node) => {
+              if (!node) return node;
+              if (Array.isArray(node)) return node.map(cleanTextNodeAttrs);
+              if (node.type === 'text' && node.attrs) {
+                const { attrs, ...rest } = node;
+                return rest;
+              }
+              if (node.content) {
+                return { ...node, content: cleanTextNodeAttrs(node.content) };
+              }
+              return node;
+            };
+            content = cleanTextNodeAttrs(content);
             editor.commands.setContent(content);
           } catch (err) {
             console.error('Error parsing document content:', err);
@@ -233,6 +301,8 @@ const TextEditor = () => {
     <Page>
       <div className="flex h-screen">
         <div className="flex-1 flex flex-col">
+          {/* Show active collaborators above the editor */}
+          <CollabUserList provider={providerRef.current} />
           <div className="flex-1 bg-white overflow-y-auto">
             {/* Document title with Return to Home button */}
             <div className="p-4 flex items-center">
@@ -245,111 +315,215 @@ const TextEditor = () => {
             </div>
 
             {/* Toolbar */}
-            <div className="border-b border-gray-200 p-2 flex items-center flex-wrap">
-              {/* Font Family */}
-              <select
-                className="mr-2 px-2 py-1 border rounded text-sm"
-                onChange={e => editor.chain().focus().setFontFamily(e.target.value).run()}
-                defaultValue="inherit"
-              >
-                <option value="inherit">Font</option>
-                <option value="Arial">Arial</option>
-                <option value="Georgia">Georgia</option>
-                <option value="Times New Roman">Times New Roman</option>
-                <option value="Courier New">Courier New</option>
-                <option value="Verdana">Verdana</option>
-              </select>
-              {/* Font Size */}
-              <select
-                className="mr-2 px-2 py-1 border rounded text-sm"
-                onChange={e => editor.chain().focus().setFontSize(e.target.value).run()}
-                defaultValue="16px"
-              >
-                <option value="12px">12</option>
-                <option value="14px">14</option>
-                <option value="16px">16</option>
-                <option value="18px">18</option>
-                <option value="24px">24</option>
-                <option value="32px">32</option>
-              </select>
-              {/* Highlight */}
-              <MenuButton
-                onClick={() => editor.chain().focus().toggleHighlight().run()}
-                active={editor.isActive('highlight')}
-              >
-                <span style={{ background: 'yellow', padding: '0 4px' }}>H</span>
-              </MenuButton>
-              {/* Alignment */}
-              <MenuButton onClick={() => editor.chain().focus().setTextAlign('left').run()} active={editor.isActive({ textAlign: 'left' })}>L</MenuButton>
-              <MenuButton onClick={() => editor.chain().focus().setTextAlign('center').run()} active={editor.isActive({ textAlign: 'center' })}>C</MenuButton>
-              <MenuButton onClick={() => editor.chain().focus().setTextAlign('right').run()} active={editor.isActive({ textAlign: 'right' })}>R</MenuButton>
-              <MenuButton onClick={() => editor.chain().focus().setTextAlign('justify').run()} active={editor.isActive({ textAlign: 'justify' })}>J</MenuButton>
-              <MenuButton
-                onClick={() => editor.chain().focus().toggleBold().run()}
-                active={editor.isActive('bold')}
-              >
-                <FaBold />
-              </MenuButton>
-              <MenuButton
-                onClick={() => editor.chain().focus().toggleItalic().run()}
-                active={editor.isActive('italic')}
-              >
-                <FaItalic />
-              </MenuButton>
-              <MenuButton
-                onClick={() => editor.chain().focus().toggleStrike().run()}
-                active={editor.isActive('strike')}
-              >
-                <FaUnderline />
-              </MenuButton>
-              
-              <div className="mx-2 h-6 w-px bg-gray-200" />
-              
-              <MenuButton
-                onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
-                active={editor.isActive('heading', { level: 1 })}
-              >
-                <FaHeading />
-              </MenuButton>
-              <MenuButton
-                onClick={() => editor.chain().focus().toggleBulletList().run()}
-                active={editor.isActive('bulletList')}
-              >
-                <FaListUl />
-              </MenuButton>
-              <MenuButton
-                onClick={() => editor.chain().focus().toggleOrderedList().run()}
-                active={editor.isActive('orderedList')}
-              >
-                <FaListOl />
-              </MenuButton>
-              
-              <div className="mx-2 h-6 w-px bg-gray-200" />
-              
-              <MenuButton
-                onClick={() => editor.chain().focus().toggleBlockquote().run()}
-                active={editor.isActive('blockquote')}
-              >
-                <FaQuoteLeft />
-              </MenuButton>
-              <MenuButton
-                onClick={() => editor.chain().focus().toggleCodeBlock().run()}
-                active={editor.isActive('codeBlock')}
-              >
-                <FaCode />
-              </MenuButton>
-              
-              <div className="mx-2 h-6 w-px bg-gray-200" />
-              
-              <MenuButton onClick={() => editor.chain().focus().undo().run()}>
-                <FaUndo />
-              </MenuButton>
-              <MenuButton onClick={() => editor.chain().focus().redo().run()}>
-                <FaRedo />
-              </MenuButton>
-              <MenuButton onClick={saveDocument} disabled={!editor || !id}>
-                Save
-              </MenuButton>
+            <div className="border-b border-gray-200 p-2 flex items-center flex-wrap gap-1 bg-gray-50">
+              {/* Text Formatting Group */}
+              <div className="flex items-center border-r border-gray-200 pr-2">
+                <MenuButton
+                  onClick={() => editor.chain().focus().toggleBold().run()}
+                  active={editor.isActive('bold')}
+                  title="Bold"
+                >
+                  <FaBold />
+                </MenuButton>
+                <MenuButton
+                  onClick={() => editor.chain().focus().toggleItalic().run()}
+                  active={editor.isActive('italic')}
+                  title="Italic"
+                >
+                  <FaItalic />
+                </MenuButton>
+                <MenuButton
+                  onClick={() => editor.chain().focus().toggleStrike().run()}
+                  active={editor.isActive('strike')}
+                  title="Strikethrough"
+                >
+                  <FaStrikethrough />
+                </MenuButton>
+                <MenuButton
+                  onClick={() => editor.chain().focus().toggleSubscript().run()}
+                  active={editor.isActive('subscript')}
+                  title="Subscript"
+                >
+                  <FaSubscript />
+                </MenuButton>
+                <MenuButton
+                  onClick={() => editor.chain().focus().toggleSuperscript().run()}
+                  active={editor.isActive('superscript')}
+                  title="Superscript"
+                >
+                  <FaSuperscript />
+                </MenuButton>
+              </div>
+
+              {/* Alignment Group */}
+              <div className="flex items-center border-r border-gray-200 pr-2">
+                <MenuButton
+                  onClick={() => editor.chain().focus().setTextAlign('left').run()}
+                  active={editor.isActive({ textAlign: 'left' })}
+                  title="Align Left"
+                >
+                  <FaAlignLeft />
+                </MenuButton>
+                <MenuButton
+                  onClick={() => editor.chain().focus().setTextAlign('center').run()}
+                  active={editor.isActive({ textAlign: 'center' })}
+                  title="Align Center"
+                >
+                  <FaAlignCenter />
+                </MenuButton>
+                <MenuButton
+                  onClick={() => editor.chain().focus().setTextAlign('right').run()}
+                  active={editor.isActive({ textAlign: 'right' })}
+                  title="Align Right"
+                >
+                  <FaAlignRight />
+                </MenuButton>
+                <MenuButton
+                  onClick={() => editor.chain().focus().setTextAlign('justify').run()}
+                  active={editor.isActive({ textAlign: 'justify' })}
+                  title="Justify"
+                >
+                  <FaAlignJustify />
+                </MenuButton>
+              </div>
+
+              {/* Lists and Indentation Group */}
+              <div className="flex items-center border-r border-gray-200 pr-2">
+                <MenuButton
+                  onClick={() => editor.chain().focus().toggleBulletList().run()}
+                  active={editor.isActive('bulletList')}
+                  title="Bullet List"
+                >
+                  <FaListUl />
+                </MenuButton>
+                <MenuButton
+                  onClick={() => editor.chain().focus().toggleOrderedList().run()}
+                  active={editor.isActive('orderedList')}
+                  title="Numbered List"
+                >
+                  <FaListOl />
+                </MenuButton>
+                <MenuButton
+                  onClick={() => editor.chain().focus().indent().run()}
+                  title="Indent"
+                >
+                  <FaIndent />
+                </MenuButton>
+                <MenuButton
+                  onClick={() => editor.chain().focus().outdent().run()}
+                  title="Outdent"
+                >
+                  <FaOutdent />
+                </MenuButton>
+              </div>
+
+              {/* Headings and Blocks Group */}
+              <div className="flex items-center border-r border-gray-200 pr-2">
+                <MenuButton
+                  onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
+                  active={editor.isActive('heading', { level: 1 })}
+                  title="Heading 1"
+                >
+                  H1
+                </MenuButton>
+                <MenuButton
+                  onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
+                  active={editor.isActive('heading', { level: 2 })}
+                  title="Heading 2"
+                >
+                  H2
+                </MenuButton>
+                <MenuButton
+                  onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
+                  active={editor.isActive('heading', { level: 3 })}
+                  title="Heading 3"
+                >
+                  H3
+                </MenuButton>
+                <MenuButton
+                  onClick={() => editor.chain().focus().toggleBlockquote().run()}
+                  active={editor.isActive('blockquote')}
+                  title="Blockquote"
+                >
+                  <FaQuoteLeft />
+                </MenuButton>
+                <MenuButton
+                  onClick={() => editor.chain().focus().toggleCodeBlock().run()}
+                  active={editor.isActive('codeBlock')}
+                  title="Code Block"
+                >
+                  <FaCode />
+                </MenuButton>
+              </div>
+
+              {/* Links and Media Group */}
+              <div className="flex items-center border-r border-gray-200 pr-2">
+                <MenuButton
+                  onClick={() => {
+                    const url = window.prompt('Enter URL');
+                    if (url) {
+                      editor.chain().focus().setLink({ href: url }).run();
+                    }
+                  }}
+                  active={editor.isActive('link')}
+                  title="Add Link"
+                >
+                  <FaLink />
+                </MenuButton>
+                <MenuButton
+                  onClick={() => editor.chain().focus().unsetLink().run()}
+                  disabled={!editor.isActive('link')}
+                  title="Remove Link"
+                >
+                  <FaUnlink />
+                </MenuButton>
+                <MenuButton
+                  onClick={() => {
+                    const url = window.prompt('Enter image URL');
+                    if (url) {
+                      editor.chain().focus().setImage({ src: url }).run();
+                    }
+                  }}
+                  title="Insert Image"
+                >
+                  <FaImage />
+                </MenuButton>
+                <MenuButton
+                  onClick={() => {
+                    // Add table insertion logic here
+                    editor.chain().focus().insertTable({ rows: 3, cols: 3 }).run();
+                  }}
+                  title="Insert Table"
+                >
+                  <FaTable />
+                </MenuButton>
+              </div>
+
+              {/* History Group */}
+              <div className="flex items-center">
+                <MenuButton
+                  onClick={() => editor.chain().focus().undo().run()}
+                  disabled={!editor.can().undo()}
+                  title="Undo"
+                >
+                  <FaUndo />
+                </MenuButton>
+                <MenuButton
+                  onClick={() => editor.chain().focus().redo().run()}
+                  disabled={!editor.can().redo()}
+                  title="Redo"
+                >
+                  <FaRedo />
+                </MenuButton>
+                <button
+                  onClick={saveDocument}
+                  disabled={!editor || !id}
+                  className="ml-2 px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50"
+                  title="Save Document"
+                >
+                  Save
+                </button>
+              </div>
             </div>
 
             {/* Editor */}

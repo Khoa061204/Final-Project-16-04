@@ -49,4 +49,8 @@ input[placeholder="Untitled Document"] {
   padding: 2rem 0;
 }
 
+.tiptap-collaboration-cursor__label {
+  display: none !important;
+}
+
 

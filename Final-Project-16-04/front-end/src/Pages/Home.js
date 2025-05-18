@@ -175,7 +175,9 @@ const Home = () => {
           title: fileName,
           content: {
             type: 'doc',
-            content: [{ type: 'paragraph', content: [{ type: 'text', text: '' }] }]
+            content: [
+              { type: 'paragraph', content: [] }
+            ]
           }
         })
       });

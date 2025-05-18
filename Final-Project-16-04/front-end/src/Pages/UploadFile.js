@@ -149,7 +149,7 @@ function UploadFile() {
           imageUrl: fileContent
         };
       } else {
-        // Handle text files
+        // Handle text files - always use Tiptap-compatible JSON
         fileContent = await new Promise((resolve, reject) => {
           const reader = new FileReader();
           reader.onload = e => resolve(e.target.result);
@@ -162,16 +162,14 @@ function UploadFile() {
           content: {
             type: 'doc',
             content: [
-              { 
-                type: 'paragraph', 
-                content: [{ 
-                  type: 'text', 
-                  text: fileContent,
-                  marks: [{ type: 'code', attrs: { language: file.name.split('.').pop() } }]
-                }] 
-              }
-            ]
-          }
+              {
+                type: 'paragraph',
+                content: fileContent
+                  ? [{ type: 'text', text: fileContent }]
+                  : [],
+              },
+            ],
+          },
         };
       }
 

@@ -17,7 +17,8 @@ const AppDataSource = new DataSource({
   entities: [User, Document, File, Folder],
   driver: require("mysql2"),
   extra: {
-    connectionLimit: 10
+    connectionLimit: 10,
+    allowPublicKeyRetrieval: true
   }
 });
 
