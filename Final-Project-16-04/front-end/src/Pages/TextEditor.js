@@ -7,7 +7,6 @@ import CollaborationCursor from '@tiptap/extension-collaboration-cursor';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import { useParams, useNavigate, useBeforeUnload } from 'react-router-dom';
-import Sidebar from '../components/Sidebar';
 import Topbar from '../components/Topbar';
 import {
   FaBold,
@@ -32,6 +31,8 @@ import {
   FaUnlink,
   FaTable,
   FaImage,
+  FaUnderline,
+  FaHighlighter,
 } from 'react-icons/fa';
 import { Editor } from '@tiptap/core';
 import Page from '../components/Page';
@@ -48,6 +49,11 @@ import TableRow from '@tiptap/extension-table-row';
 import TableCell from '@tiptap/extension-table-cell';
 import TableHeader from '@tiptap/extension-table-header';
 import CollabUserList from '../components/CollabUserList';
+import Underline from '@tiptap/extension-underline';
+import Color from '@tiptap/extension-color';
+import { useContext } from 'react';
+import { AuthContext } from '../App';
+import CollaborationCursorOverlay from '../components/CollaborationCursorOverlay';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
@@ -63,74 +69,8 @@ const TextEditor = () => {
   const providerRef = useRef(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-
-  // Initialize Yjs document and provider
-  useEffect(() => {
-    if (!id) return;
-
-    const ydoc = new Y.Doc();
-    ydocRef.current = ydoc;
-    const provider = new WebsocketProvider('ws://localhost:1234', id, ydoc);
-    providerRef.current = provider;
-
-    provider.on('status', event => {
-      setStatus(event.status);
-    });
-
-    return () => {
-      provider.destroy();
-      ydoc.destroy();
-    };
-  }, [id]);
-
-  // Initialize editor when provider is connected
-  useEffect(() => {
-    if (status !== 'connected' || !ydocRef.current || !providerRef.current) return;
-
-    const newEditor = new Editor({
-      extensions: [
-        StarterKit,
-        TextStyle,
-        Subscript,
-        Superscript,
-        Link,
-        Image,
-        Table.configure({ resizable: true }),
-        TableRow,
-        TableCell,
-        TableHeader,
-        Collaboration.configure({
-          document: ydocRef.current,
-        }),
-        CollaborationCursor.configure({
-          provider: providerRef.current,
-          user: {
-            name: localStorage.getItem('username') || 'Anonymous',
-            color: '#' + Math.floor(Math.random()*16777215).toString(16),
-          },
-        }),
-        Highlight,
-        TextAlign.configure({
-          types: ['heading', 'paragraph'],
-        }),
-      ],
-      editorProps: {
-        attributes: {
-          class: 'prose prose-sm sm:prose lg:prose-lg xl:prose-2xl mx-auto focus:outline-none',
-        },
-      },
-      content: document?.content,
-      editable: true,
-    });
-
-    setEditor(newEditor);
-
-    return () => {
-      if (newEditor) {
-        newEditor.destroy();
-      }
-    };
-  }, [status, document?.content]);
+  const { user } = useContext(AuthContext);
+  const overlayRef = useRef(null);
 
   // Load document content
   useEffect(() => {
@@ -152,6 +92,32 @@ const TextEditor = () => {
         }
 
         const data = await response.json();
+        
+        // If it's a PDF, convert it to text
+        if (data.document.file_type === 'pdf') {
+          try {
+            const convertResponse = await fetch(`${API_BASE_URL}/documents/${id}/convert-pdf`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${localStorage.getItem('token')}`
+              }
+            });
+
+            if (!convertResponse.ok) {
+              throw new Error('Failed to convert PDF');
+            }
+
+            const convertedData = await convertResponse.json();
+            // Navigate to the new converted document
+            navigate(`/document/${convertedData.document.id}`);
+            return;
+          } catch (err) {
+            console.error('Error converting PDF:', err);
+            setError('Failed to convert PDF. Please try again.');
+            return;
+          }
+        }
+
         setTitle(data.document.title || 'Untitled Document');
         
         // If there's content and editor is ready, set the content
@@ -191,6 +157,75 @@ const TextEditor = () => {
       loadDocument();
     }
   }, [id, editor, navigate]);
+
+  // Initialize editor when provider is connected
+  useEffect(() => {
+    if (status !== 'connected' || !ydocRef.current || !providerRef.current) return;
+
+    // Helper to clear overlay
+    function clearOverlay() {
+      if (overlayRef.current) {
+        overlayRef.current.innerHTML = '';
+      }
+    }
+
+    const newEditor = new Editor({
+      extensions: [
+        StarterKit.configure({
+          // Disable default underline to use our custom one
+          underline: false,
+        }),
+        TextStyle,
+        Underline,
+        Color.configure({
+          types: ['textStyle'],
+        }),
+        Subscript,
+        Superscript,
+        Link,
+        Image,
+        Table.configure({ resizable: true }),
+        TableRow,
+        TableCell,
+        TableHeader,
+        Collaboration.configure({
+          document: ydocRef.current,
+        }),
+        CollaborationCursor.configure({
+          provider: providerRef.current,
+          user: {
+            name: user?.name || user?.username || user?.email || 'Anonymous',
+            color: '#' + Math.floor(Math.random()*16777215).toString(16),
+          },
+          renderLabel() {
+            // Always return null, label is rendered by React overlay
+            return null;
+          }
+        }),
+        Highlight,
+        TextAlign.configure({
+          types: ['heading', 'paragraph'],
+        }),
+      ],
+      editorProps: {
+        attributes: {
+          class: 'prose prose-sm sm:prose lg:prose-lg xl:prose-2xl mx-auto focus:outline-none',
+        },
+      },
+      content: document?.content,
+      editable: true,
+    });
+
+    setEditor(newEditor);
+
+    // Clean up overlay on unmount
+    return () => {
+      clearOverlay();
+      if (newEditor) {
+        newEditor.destroy();
+      }
+    };
+  }, [status, document?.content, user]);
 
   // Save document content
   const saveDocument = async () => {
@@ -272,10 +307,29 @@ const TextEditor = () => {
     navigate('/');
   };
 
+  // Add this useEffect after the state declarations in TextEditor
+  useEffect(() => {
+    if (!id) return;
+    // Create a new Yjs document
+    ydocRef.current = new Y.Doc();
+    // Connect to the WebSocket server on the correct port
+    providerRef.current = new WebsocketProvider(
+      'ws://localhost:1234', // Changed from ws://localhost:3000/ws
+      `document-${id}`,
+      ydocRef.current
+    );
+    providerRef.current.on('status', event => {
+      setStatus(event.status); // "connected" or "disconnected"
+    });
+    return () => {
+      providerRef.current?.destroy();
+      ydocRef.current?.destroy();
+    };
+  }, [id]);
+
   if (!editor) {
     return (
       <div className="flex h-screen">
-        <Sidebar />
         <div className="flex-1 flex flex-col">
           <Topbar />
           <div className="flex-1 bg-white flex items-center justify-center">
@@ -299,11 +353,13 @@ const TextEditor = () => {
 
   return (
     <Page>
-      <div className="flex h-screen">
-        <div className="flex-1 flex flex-col">
+    <div className="flex h-screen">
+      <div className="flex-1 flex flex-col">
           {/* Show active collaborators above the editor */}
           <CollabUserList provider={providerRef.current} />
-          <div className="flex-1 bg-white overflow-y-auto">
+          <div className="flex-1 bg-white overflow-y-auto" style={{ position: 'relative' }}>
+            {/* Overlay for floating cursor labels */}
+            <CollaborationCursorOverlay editor={editor} provider={providerRef.current} />
             {/* Document title with Return to Home button */}
             <div className="p-4 flex items-center">
               <button
@@ -312,33 +368,41 @@ const TextEditor = () => {
               >
                 ← Home
               </button>
+              <h1 className="text-xl font-semibold">{title}</h1>
             </div>
 
             {/* Toolbar */}
             <div className="border-b border-gray-200 p-2 flex items-center flex-wrap gap-1 bg-gray-50">
               {/* Text Formatting Group */}
               <div className="flex items-center border-r border-gray-200 pr-2">
-                <MenuButton
-                  onClick={() => editor.chain().focus().toggleBold().run()}
-                  active={editor.isActive('bold')}
+            <MenuButton
+              onClick={() => editor.chain().focus().toggleBold().run()}
+              active={editor.isActive('bold')}
                   title="Bold"
-                >
-                  <FaBold />
-                </MenuButton>
-                <MenuButton
-                  onClick={() => editor.chain().focus().toggleItalic().run()}
-                  active={editor.isActive('italic')}
+            >
+              <FaBold />
+            </MenuButton>
+            <MenuButton
+              onClick={() => editor.chain().focus().toggleItalic().run()}
+              active={editor.isActive('italic')}
                   title="Italic"
-                >
-                  <FaItalic />
-                </MenuButton>
-                <MenuButton
-                  onClick={() => editor.chain().focus().toggleStrike().run()}
-                  active={editor.isActive('strike')}
+            >
+              <FaItalic />
+            </MenuButton>
+            <MenuButton
+              onClick={() => editor.chain().focus().toggleStrike().run()}
+              active={editor.isActive('strike')}
                   title="Strikethrough"
                 >
                   <FaStrikethrough />
                 </MenuButton>
+                <MenuButton
+                  onClick={() => editor.chain().focus().toggleUnderline().run()}
+                  active={editor.isActive('underline')}
+                  title="Underline"
+            >
+              <FaUnderline />
+            </MenuButton>
                 <MenuButton
                   onClick={() => editor.chain().focus().toggleSubscript().run()}
                   active={editor.isActive('subscript')}
@@ -352,6 +416,31 @@ const TextEditor = () => {
                   title="Superscript"
                 >
                   <FaSuperscript />
+                </MenuButton>
+              </div>
+
+              {/* Text Color Group */}
+              <div className="flex items-center border-r border-gray-200 pr-2">
+                <input
+                  type="color"
+                  onChange={e => {
+                    editor.chain().focus().setColor(e.target.value).run();
+                  }}
+                  className="w-8 h-8 p-1 rounded cursor-pointer"
+                  title="Text Color"
+                />
+                <MenuButton
+                  onClick={() => editor.chain().focus().unsetColor().run()}
+                  title="Remove Color"
+                >
+                  <span className="text-gray-500">×</span>
+                </MenuButton>
+                <MenuButton
+                  onClick={() => editor.chain().focus().toggleHighlight().run()}
+                  active={editor.isActive('highlight')}
+                  title="Highlight"
+                >
+                  <FaHighlighter />
                 </MenuButton>
               </div>
 
@@ -371,13 +460,13 @@ const TextEditor = () => {
                 >
                   <FaAlignCenter />
                 </MenuButton>
-                <MenuButton
+            <MenuButton
                   onClick={() => editor.chain().focus().setTextAlign('right').run()}
                   active={editor.isActive({ textAlign: 'right' })}
                   title="Align Right"
-                >
+            >
                   <FaAlignRight />
-                </MenuButton>
+            </MenuButton>
                 <MenuButton
                   onClick={() => editor.chain().focus().setTextAlign('justify').run()}
                   active={editor.isActive({ textAlign: 'justify' })}
@@ -389,20 +478,20 @@ const TextEditor = () => {
 
               {/* Lists and Indentation Group */}
               <div className="flex items-center border-r border-gray-200 pr-2">
-                <MenuButton
-                  onClick={() => editor.chain().focus().toggleBulletList().run()}
-                  active={editor.isActive('bulletList')}
+            <MenuButton
+              onClick={() => editor.chain().focus().toggleBulletList().run()}
+              active={editor.isActive('bulletList')}
                   title="Bullet List"
-                >
-                  <FaListUl />
-                </MenuButton>
-                <MenuButton
-                  onClick={() => editor.chain().focus().toggleOrderedList().run()}
-                  active={editor.isActive('orderedList')}
+            >
+              <FaListUl />
+            </MenuButton>
+            <MenuButton
+              onClick={() => editor.chain().focus().toggleOrderedList().run()}
+              active={editor.isActive('orderedList')}
                   title="Numbered List"
-                >
-                  <FaListOl />
-                </MenuButton>
+            >
+              <FaListOl />
+            </MenuButton>
                 <MenuButton
                   onClick={() => editor.chain().focus().indent().run()}
                   title="Indent"
@@ -440,20 +529,20 @@ const TextEditor = () => {
                 >
                   H3
                 </MenuButton>
-                <MenuButton
-                  onClick={() => editor.chain().focus().toggleBlockquote().run()}
-                  active={editor.isActive('blockquote')}
+            <MenuButton
+              onClick={() => editor.chain().focus().toggleBlockquote().run()}
+              active={editor.isActive('blockquote')}
                   title="Blockquote"
-                >
-                  <FaQuoteLeft />
-                </MenuButton>
-                <MenuButton
-                  onClick={() => editor.chain().focus().toggleCodeBlock().run()}
-                  active={editor.isActive('codeBlock')}
+            >
+              <FaQuoteLeft />
+            </MenuButton>
+            <MenuButton
+              onClick={() => editor.chain().focus().toggleCodeBlock().run()}
+              active={editor.isActive('codeBlock')}
                   title="Code Block"
-                >
-                  <FaCode />
-                </MenuButton>
+            >
+              <FaCode />
+            </MenuButton>
               </div>
 
               {/* Links and Media Group */}
@@ -506,15 +595,15 @@ const TextEditor = () => {
                   disabled={!editor.can().undo()}
                   title="Undo"
                 >
-                  <FaUndo />
-                </MenuButton>
+              <FaUndo />
+            </MenuButton>
                 <MenuButton
                   onClick={() => editor.chain().focus().redo().run()}
                   disabled={!editor.can().redo()}
                   title="Redo"
                 >
-                  <FaRedo />
-                </MenuButton>
+              <FaRedo />
+            </MenuButton>
                 <button
                   onClick={saveDocument}
                   disabled={!editor || !id}
@@ -524,56 +613,44 @@ const TextEditor = () => {
                   Save
                 </button>
               </div>
-            </div>
+          </div>
 
-            {/* Editor */}
-            {document && document.type === 'pdf' && document.pdfUrl ? (
-              <div style={{ width: '100%', height: '90vh', background: '#eee' }}>
-                <iframe
-                  src={document.pdfUrl}
-                  title={document.title}
-                  width="100%"
-                  height="100%"
-                  style={{ border: 'none' }}
-                />
-              </div>
+          {/* Editor */}
+            <div className="tiptap-paged-editor">
+              <div className="tiptap-page" style={{ position: 'relative' }}>
+            {error ? (
+              <div className="text-red-500">{error}</div>
             ) : (
-              <div className="tiptap-paged-editor">
-                <div className="tiptap-page" style={{ position: 'relative' }}>
-                  {error ? (
-                    <div className="text-red-500">{error}</div>
-                  ) : (
-                    <EditorContent editor={editor} className="prose max-w-none" />
-                  )}
-                  {/* Page Number */}
-                  <div style={{
-                    position: 'absolute',
-                    bottom: 8,
-                    right: 24,
-                    fontSize: '0.9rem',
-                    color: '#aaa'
-                  }}>
-                    Page 1
-                  </div>
+              <EditorContent editor={editor} className="prose max-w-none" />
+            )}
+                {/* Page Number */}
+                <div style={{
+                  position: 'absolute',
+                  bottom: 8,
+                  right: 24,
+                  fontSize: '0.9rem',
+                  color: '#aaa'
+                }}>
+                  Page 1
                 </div>
               </div>
-            )}
+            </div>
 
             {/* Word Counter */}
             <div className="fixed bottom-0 left-0 w-full bg-gray-100 border-t border-gray-300 py-2 px-8 flex justify-end items-center z-50" style={{height: '40px'}}>
               <span className="text-gray-700 text-sm">Word count: {editor ? editor.getText().trim().split(/\s+/).filter(Boolean).length : 0}</span>
-            </div>
+          </div>
 
-            {/* Status */}
-            <div className="fixed bottom-4 right-4 flex items-center space-x-4">
-              <span className={`inline-block w-2 h-2 rounded-full ${
-                status === 'connected' ? 'bg-green-500' : 'bg-yellow-500'
-              }`} />
-              <span className="text-sm text-gray-500">
-                {status === 'connected' ? 
-                  (saving ? 'Saving...' : 'All changes saved') : 
-                  'Connecting...'}
-              </span>
+          {/* Status */}
+          <div className="fixed bottom-4 right-4 flex items-center space-x-4">
+            <span className={`inline-block w-2 h-2 rounded-full ${
+              status === 'connected' ? 'bg-green-500' : 'bg-yellow-500'
+            }`} />
+            <span className="text-sm text-gray-500">
+              {status === 'connected' ? 
+                (saving ? 'Saving...' : 'All changes saved') : 
+                'Connecting...'}
+            </span>
             </div>
             {saveSuccess && (
               <div className="fixed bottom-16 right-4 bg-green-500 text-white px-4 py-2 rounded shadow">

@@ -1,221 +1,283 @@
-import React, { useState, useCallback, useContext, useEffect, useRef } from "react";
-import { useNavigate, useParams, useLocation } from "react-router-dom";
-import { getAuthHeaders, handleLogout } from '../utils/auth';
+import React, { useState, useEffect, useContext, useRef } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { getAuthHeaders } from '../utils/auth';
 import { AuthContext } from "../App";
-import Sidebar from "../components/Sidebar";
-import Topbar from "../components/Topbar";
-import FolderCard from "../components/FolderCard";
-import ActionCard from "../components/ActionCard";
-import Tabs from "../components/Tabs";
-import { FaFolder, FaFileAlt, FaEllipsisV, FaRegClock } from 'react-icons/fa';
-import { FiPlusCircle, FiFolderPlus, FiUpload, FiFile, FiStar, FiShare2 } from 'react-icons/fi';
-import { FixedSizeGrid as Grid } from 'react-window';
+import { FaFolder, FaFileAlt, FaPlus, FaUpload, FaThList, FaThLarge, FaEllipsisV, FaShareAlt } from 'react-icons/fa';
+import { Menu, Transition } from '@headlessui/react';
+import ItemMenu from '../components/ItemMenu';
 
-// API endpoints
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 const DOCUMENTS_ENDPOINT = `${API_BASE_URL}/documents`;
 const FILES_ENDPOINT = `${API_BASE_URL}/files`;
 const FOLDERS_ENDPOINT = `${API_BASE_URL}/folders`;
-const ALL_FILES_ENDPOINT = `${API_BASE_URL}/all-files`;
 
-// Action items configuration
-const ACTION_ITEMS = [
-  { 
-    id: 'new-doc',
-    title: "New document", 
-    color: "violet", 
-    icon: "📄"
-  },
-  { 
-    id: 'upload',
-    title: "Upload file", 
-    color: "blue", 
-    icon: "⬆️"
-  },
-  { 
-    id: 'new-team',
-    title: "New team", 
-    color: "green", 
-    icon: "👥"
-  }
+const TABS = [
+  { id: 'all', label: 'All' },
+  { id: 'recent', label: 'Recently opened' },
+  { id: 'shared', label: 'Shared' },
+  { id: 'favorites', label: 'Favorites' },
 ];
 
-// Folder items configuration
-const FOLDER_ITEMS = [
-  { id: '1', title: "3D renders", size: "92 MB", items: "18 images" },
-  { id: '2', title: "Team photos", size: "188 MB", items: "32 images" },
-  { id: '3', title: "UI presentations", size: "286 MB", items: "6 files" }
-];
-
-const QUICK_ACCESS_TABS = [
-  { id: 'all', label: 'All', icon: <FiFile /> },
-  { id: 'recent', label: 'Recent', icon: <FaRegClock /> },
-  { id: 'shared', label: 'Shared', icon: <FiShare2 /> },
-  { id: 'favorites', label: 'Favorites', icon: <FiStar /> },
-];
-
-const ALLOWED_EXTENSIONS = ['.txt', '.doc', '.md'];
-
-// Memoized FileCard
-const FileCard = React.memo(function FileCard({ file, onClick, onDragStart, style, children }) {
-  return (
-    <div
-      style={style}
-      className="group relative bg-white border border-gray-200 rounded-sm hover:border-blue-400 cursor-pointer transition-colors"
-      draggable
-      onDragStart={onDragStart}
-      onClick={onClick}
-    >
-      <div className="aspect-w-3 aspect-h-2 bg-gray-50 p-4 flex items-center justify-center">
-        <FaFileAlt className="h-12 w-12 text-blue-400" />
-      </div>
-      {children}
-    </div>
-  );
-});
-
-// Local FolderCard for Home page
-const LocalFolderCard = React.memo(function LocalFolderCard({ folder, onClick, onDrop, onDragOver, style, children }) {
-  return (
-    <div
-      style={style}
-      className="group relative bg-white border border-gray-200 rounded-sm hover:border-blue-400 cursor-pointer transition-colors"
-      onClick={onClick}
-      onDrop={onDrop}
-      onDragOver={onDragOver}
-    >
-      <div className="aspect-w-3 aspect-h-2 bg-gray-50 p-4 flex items-center justify-center">
-        <FaFolder className="h-12 w-12 text-yellow-400" />
-      </div>
-      {children}
-    </div>
-  );
-});
-
-const Home = () => {
+const Home = ({ teams: propTeams }) => {
   const navigate = useNavigate();
   const { folderId } = useParams();
-  const location = useLocation();
-  const { isAuthenticated, setIsAuthenticated } = useContext(AuthContext);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const { isAuthenticated, user } = useContext(AuthContext);
   const [files, setFiles] = useState([]);
   const [folders, setFolders] = useState([]);
+  const [error, setError] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('all');
+  const [showPlusMenu, setShowPlusMenu] = useState(false);
+  const plusMenuRef = useRef();
+
+  // For new folder modal
   const [showFolderModal, setShowFolderModal] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [folderError, setFolderError] = useState("");
-  const [selectedFolder, setSelectedFolder] = useState(null);
-  const [folderFiles, setFolderFiles] = useState([]);
-  const [currentFolder, setCurrentFolder] = useState(null);
-  const [breadcrumbs, setBreadcrumbs] = useState([]);
-  const [activeTab, setActiveTab] = useState('all');
-  const [showMenu, setShowMenu] = useState(false);
-  const menuRef = useRef();
-  const [showNewFileMenu, setShowNewFileMenu] = useState(false);
-  const newFileMenuRef = useRef();
-  const [showNewFileModal, setShowNewFileModal] = useState(false);
-  const [newFileName, setNewFileName] = useState("");
-  const [fileExtension, setFileExtension] = useState(".txt");
-  const [fileError, setFileError] = useState("");
-  const [fileContent, setFileContent] = useState(null);
-  const [isFetching, setIsFetching] = useState(false);
-  const [openMenuId, setOpenMenuId] = useState(null);
+
+  // For new document modal
+  const [showDocModal, setShowDocModal] = useState(false);
+  const [newDocName, setNewDocName] = useState("");
+  const [docError, setDocError] = useState("");
+
+  const [draggedItem, setDraggedItem] = useState(null);
+  const [viewStyle, setViewStyle] = useState('list'); // 'list' or 'grid'
+
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareTarget, setShareTarget] = useState(null); // file or document to share
+  const [shareEmails, setShareEmails] = useState('');
+  const [shareError, setShareError] = useState('');
+  const [sharedItems, setSharedItems] = useState({ files: [], documents: [] });
+  const [shareTab, setShareTab] = useState('team'); // 'team' or 'email'
+  const [selectedTeamUsers, setSelectedTeamUsers] = useState([]); // user IDs
+  const [teamUsers, setTeamUsers] = useState([]);
+
+  // Add state for selected teams
+  const [selectedTeams, setSelectedTeams] = useState([]);
+
+  // Add state for info modal
+  const [showInfoModal, setShowInfoModal] = useState(false);
   const [infoItem, setInfoItem] = useState(null);
 
-  // Close menu on outside click
-  useEffect(() => {
-    const handleClick = (e) => {
-      if (menuRef.current && !menuRef.current.contains(e.target)) {
-        setShowMenu(false);
-      }
-    };
-    if (showMenu) document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [showMenu]);
+  // Add state for openMenuId
+  const [openMenuId, setOpenMenuId] = useState(null);
 
-  // Close New (+) menu on outside click
+  // Use teams from prop or context
+  const teams = propTeams || [];
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      console.log('Current folderId from URL:', folderId);
+      fetchData();
+    }
+  }, [isAuthenticated, folderId]);
+
+  // Close plus menu on outside click
   useEffect(() => {
     function handleClickOutside(event) {
-      if (newFileMenuRef.current && !newFileMenuRef.current.contains(event.target)) {
-        setShowNewFileMenu(false);
+      if (plusMenuRef.current && !plusMenuRef.current.contains(event.target)) {
+        setShowPlusMenu(false);
       }
     }
-    if (showNewFileMenu) {
+    if (showPlusMenu) {
       document.addEventListener('mousedown', handleClickOutside);
     }
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [showNewFileMenu]);
+  }, [showPlusMenu]);
 
-  // Create a new document (collaborative, not file upload)
-  const createNewDocument = useCallback(async (fileName) => {
-    if (!isAuthenticated) {
-      navigate('/login');
-      return;
+  // Close dropdown on outside click
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (!e.target.closest('.custom-dropdown')) setOpenMenuId(null);
     }
-
-    if (!fileName.trim()) {
-      setFileError("File name is required");
-      return;
+    if (openMenuId !== null) {
+      document.addEventListener('mousedown', handleClickOutside);
     }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [openMenuId]);
 
+  const fetchData = async () => {
     setIsLoading(true);
     setError(null);
-    setFileError("");
-
     try {
-      const response = await fetch(`${API_BASE_URL}/documents`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': getAuthHeaders()['Authorization']
-        },
-        body: JSON.stringify({
-          title: fileName,
-          content: {
-            type: 'doc',
-            content: [
-              { type: 'paragraph', content: [] }
-            ]
-          }
-        })
-      });
+      // Fetch folders
+      const folderUrl = folderId ? 
+        `${FOLDERS_ENDPOINT}?parent_id=${folderId}` : 
+        FOLDERS_ENDPOINT;
+      const folderRes = await fetch(folderUrl, { headers: getAuthHeaders() });
+      if (!folderRes.ok) throw new Error('Failed to fetch folders');
+      const folderData = await folderRes.json();
+      setFolders(folderData.folders || []);
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ message: 'Network error' }));
-        if (response.status === 401) {
-          setIsAuthenticated(false);
-          handleLogout();
-          throw new Error('Session expired. Please log in again.');
-        }
-        throw new Error(errorData.message || 'Failed to create document');
-      }
+      // Fetch files
+      const params = folderId ? 
+        `?folder_id=${folderId}` : 
+        '?root=true';
+      const filesRes = await fetch(`${FILES_ENDPOINT}${params}`, { headers: getAuthHeaders() });
+      if (!filesRes.ok) throw new Error('Failed to fetch files');
+      const filesData = await filesRes.json();
 
-      const data = await response.json();
-      if (!data.document?.id) {
-        throw new Error('Invalid response from server');
-      }
+      // Fetch documents
+      const documentsRes = await fetch(`${DOCUMENTS_ENDPOINT}${params}`, { headers: getAuthHeaders() });
+      if (!documentsRes.ok) throw new Error('Failed to fetch documents');
+      const documentsData = await documentsRes.json();
 
-      setShowNewFileModal(false);
-      setNewFileName("");
-      // Navigate to the editor with the new document ID
-      navigate(`/documents/${data.document.id}`);
+      // Combine files and documents
+      const allFiles = [
+        ...(documentsData.documents || []).map(doc => ({
+          ...doc,
+          type: 'document',
+          name: doc.title || 'Untitled Document',
+          date: doc.updatedAt || doc.createdAt,
+          status: 'You edited this',
+        })),
+        ...(filesData.files || []).map(file => ({
+          ...file,
+          type: 'file',
+          name: file.file_name || 'Untitled File',
+          date: file.uploaded_at || file.createdAt,
+          status: '',
+        }))
+      ];
+      console.log('Fetched files:', allFiles.map(f => ({id: f._id || f.id, folder_id: f.folder_id, name: f.name})));
+      setFiles(allFiles);
     } catch (err) {
-      setFileError(err.message || 'An unexpected error occurred');
-      console.error('Error creating document:', err);
+      setError(err.message);
     } finally {
       setIsLoading(false);
     }
-  }, [navigate, isAuthenticated, setIsAuthenticated]);
+  };
 
-  // Create a new folder
-  const createNewFolder = async (folderName) => {
-    if (!folderName.trim()) {
+  // Only show folders whose parent_id matches the current folder
+  const filteredFolders = folders.filter(folder => {
+    if (!folderId) return !folder.parent_id;
+    return folder.parent_id === folderId;
+  });
+
+  // Only show files/documents for the current folder (strict equality)
+  const filteredFiles = files.filter(item => {
+    if (!folderId) {
+      const result = !item.folder_id;
+      if (!result) console.log('Filtered out (root):', item.name, 'folder_id:', item.folder_id);
+      return result;
+    }
+    const result = String(item.folder_id) === String(folderId);
+    if (result) {
+      console.log('File in folder:', item.name, 'folder_id:', item.folder_id, 'matches', folderId);
+    } else {
+      console.log('Filtered out (not in folder):', item.name, 'folder_id:', item.folder_id, '!=', folderId);
+    }
+    return result;
+  });
+
+  // Fetch shared items for Shared tab
+  useEffect(() => {
+    if (activeTab === 'shared' && isAuthenticated) {
+      fetchSharedItems();
+    }
+  }, [activeTab, isAuthenticated]);
+  const fetchSharedItems = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/shared`, { headers: getAuthHeaders() });
+      if (!res.ok) throw new Error('Failed to fetch shared items');
+      const data = await res.json();
+      setSharedItems(data);
+    } catch (err) {
+      setSharedItems({ files: [], documents: [] });
+    }
+  };
+
+  // Fetch team users for sharing
+  useEffect(() => {
+    if (showShareModal && shareTab === 'team') {
+      fetchTeamUsers();
+    }
+  }, [showShareModal, shareTab]);
+  const fetchTeamUsers = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/teams`, { headers: getAuthHeaders() });
+      if (!res.ok) throw new Error('Failed to fetch teams');
+      const data = await res.json();
+      // Flatten all team members, unique by id
+      const users = {};
+      (data.teams || []).forEach(team => {
+        (team.members || []).forEach(member => {
+          users[member.id] = member;
+        });
+      });
+      setTeamUsers(Object.values(users));
+    } catch (err) {
+      setTeamUsers([]);
+    }
+  };
+
+  // Tab filtering
+  const getListData = () => {
+    if (activeTab === 'shared') {
+      // Only show documents shared with you (not owned by you)
+      return [
+        ...(sharedItems.documents || [])
+          .filter(doc => doc.userId !== user?.id)
+          .map(doc => ({
+            ...doc,
+            type: 'document',
+            name: doc.title || 'Untitled Document',
+            date: doc.updatedAt || doc.createdAt,
+            status: 'Shared with you',
+          })),
+        ...(sharedItems.files || []).map(file => ({
+          ...file,
+          type: 'file',
+          name: file.file_name || 'Untitled File',
+          date: file.uploaded_at || file.createdAt,
+          status: 'Shared with you',
+        }))
+      ];
+    }
+    let allRows = [
+      ...filteredFolders.map(folder => ({
+        ...folder,
+        type: 'folder',
+        name: folder.name,
+        date: folder.created_at,
+        status: '',
+      })),
+      ...filteredFiles
+    ];
+    if (activeTab === 'recent') {
+      allRows = allRows.sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 10);
+    }
+    return allRows;
+  };
+  const listData = getListData();
+
+  // Actions
+  const handleRowClick = (item) => {
+    if (item.type === 'folder') {
+      navigate(`/folders/${item.id}`);
+    } else if (item.type === 'document') {
+      navigate(`/documents/${item.id}`);
+    } else if (item.type === 'file' && item.file_url) {
+      window.open(item.file_url, '_blank');
+    }
+  };
+
+  // + menu actions
+  const handlePlusMenu = (action) => {
+    setShowPlusMenu(false);
+    if (action === 'new-doc') setShowDocModal(true);
+    if (action === 'new-folder') setShowFolderModal(true);
+    if (action === 'upload') navigate('/upload');
+  };
+
+  // Create new folder
+  const createNewFolder = async () => {
+    if (!newFolderName.trim()) {
       setFolderError("Folder name is required");
       return;
     }
-
     try {
       const response = await fetch(FOLDERS_ENDPOINT, {
         method: 'POST',
@@ -224,733 +286,438 @@ const Home = () => {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          name: folderName,
-          parent_id: currentFolder || null
+          name: newFolderName,
+          parent_id: folderId || null
         })
       });
-
-      if (!response.ok) {
-        throw new Error('Failed to create folder');
-      }
-
-      const data = await response.json();
-      setFolders(prevFolders => [data.folder, ...prevFolders]);
+      if (!response.ok) throw new Error('Failed to create folder');
       setShowFolderModal(false);
       setNewFolderName("");
       setFolderError("");
+      fetchData();
     } catch (err) {
-      setFolderError(err.message || 'Failed to create folder');
+      setFolderError(err.message);
     }
   };
 
-  // Handle new item creation
-  const handleNewItem = (type) => {
-    setShowNewFileMenu(false);
-    
-    switch (type) {
-      case 'document':
-        setShowNewFileModal(true);
-        break;
-      case 'folder':
-        setShowFolderModal(true);
-        break;
-      case 'upload':
-        navigate('/upload');
-        break;
-      default:
-        console.warn(`Unknown item type: ${type}`);
+  // Create new document
+  const createNewDocument = async () => {
+    if (!newDocName.trim()) {
+      setDocError("Document name is required");
+      return;
     }
-  };
-
-  // Fetch folders and files for current folder
-  useEffect(() => {
-    const fetchData = async () => {
-      setIsFetching(true);
-      setError(null);
-      try {
-        // Fetch folders
-        let folderUrl = FOLDERS_ENDPOINT;
-        if (currentFolder) {
-          folderUrl += `?parent_id=${currentFolder}`;
-        }
-        const folderRes = await fetch(folderUrl, { headers: getAuthHeaders() });
-        if (!folderRes.ok) {
-          if (folderRes.status === 401) {
-            setIsAuthenticated(false);
-            handleLogout();
-            navigate('/login');
-            throw new Error('Session expired. Please log in again.');
-          }
-          throw new Error('Failed to fetch folders');
-        }
-        const folderData = await folderRes.json();
-        setFolders(folderData.folders || []);
-        // Fetch all files and documents
-        const allFilesRes = await fetch(ALL_FILES_ENDPOINT, { headers: getAuthHeaders() });
-        if (!allFilesRes.ok) {
-          if (allFilesRes.status === 401) {
-            setIsAuthenticated(false);
-            handleLogout();
-            navigate('/login');
-            throw new Error('Session expired. Please log in again.');
-          }
-          throw new Error('Failed to fetch files and documents');
-        }
-        const allFilesData = await allFilesRes.json();
-        setFiles(allFilesData.items || []);
-      } catch (err) {
-        console.error('Error fetching data:', err);
-        setError(err.message || 'Failed to load content');
-        setFolders([]);
-        setFiles([]);
-      } finally {
-        setIsFetching(false);
-      }
-    };
-    fetchData();
-  }, [currentFolder, setIsAuthenticated, navigate]);
-
-  // Handle folder click (navigate into folder)
-  const handleFolderClick = (folderId, folderName) => {
-    navigate(`/folders/${folderId}`);
-  };
-
-  // Set currentFolder from URL
-  useEffect(() => {
-    setCurrentFolder(folderId || null);
-  }, [folderId]);
-
-  // Handle breadcrumb click (navigate up)
-  const handleBreadcrumbClick = (idx) => {
-    if (idx === -1) {
-      navigate(`/`);
-    } else {
-      const crumb = breadcrumbs[idx];
-      if (crumb && crumb.id) {
-        navigate(`/folders/${crumb.id}`);
-      }
-    }
-  };
-
-  // Back button handler (browser history)
-  const handleBack = () => {
-    navigate(-1);
-  };
-
-  // Filtered data for tabs
-  const getTabData = () => {
-    if (activeTab === 'all') {
-      return { folders, files };
-    } else if (activeTab === 'recent') {
-      // Show 5 most recent folders/files
-      const recentFolders = [...folders].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 5);
-      const recentFiles = [...files].sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at)).slice(0, 5);
-      return { folders: recentFolders, files: recentFiles };
-    } else if (activeTab === 'shared') {
-      // Placeholder: no shared logic yet
-      return { folders: [], files: [] };
-    } else if (activeTab === 'favorites') {
-      // Placeholder: no favorites logic yet
-      return { folders: [], files: [] };
-    }
-    return { folders, files };
-  };
-  const { folders: tabFolders, files: tabFiles } = getTabData();
-
-  // Get combined and sorted items for the current view
-  const getCombinedItems = () => {
-    // Only show folders and documents (files uploaded through document handler)
-    return [
-      ...folders.map(folder => ({
-        ...folder,
-        type: 'folder',
-        date: folder.created_at,
-      })),
-      ...files
-        .filter(f => {
-          // Only show items that are documents or have content (indicating they were uploaded as documents)
-          const isDocument = f.type === 'document' || f.content;
-          // Only show items in current folder if one is selected
-          const inCurrentFolder = !currentFolder || f.folder_id === currentFolder;
-          return isDocument && inCurrentFolder;
+    try {
+      const response = await fetch(DOCUMENTS_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders()
+        },
+        body: JSON.stringify({
+          title: newDocName,
+          content: { type: 'doc', content: [{ type: 'paragraph', content: [] }] },
+          folder_id: folderId || null
         })
-        .map(file => ({
-          ...file,
-          date: file.createdAt || file.created_at || file.uploaded_at,
-        }))
-    ].sort((a, b) => new Date(b.date) - new Date(a.date));
+      });
+      if (!response.ok) throw new Error('Failed to create document');
+      const data = await response.json();
+      setShowDocModal(false);
+      setNewDocName("");
+      setDocError("");
+      fetchData();
+      navigate(`/documents/${data.document.id}`);
+    } catch (err) {
+      setDocError(err.message);
+    }
   };
 
-  // Handle file click
-  const handleFileClick = (file) => {
-    if (file.type === 'document') {
-      navigate(`/documents/${file.id}`);
-    } else if (file.type === 'file') {
-      // For other files, try to open them
-      if (file.url || file.file_url) {
-        window.open(file.url || file.file_url, '_blank');
-      } else {
-        setError('File URL not found');
+  // Drag and drop handlers
+  const handleDragStart = (item) => {
+    setDraggedItem(item);
+  };
+  const handleDragEnd = () => {
+    setDraggedItem(null);
+  };
+  const handleDragOver = (e) => {
+    e.preventDefault();
+  };
+  const handleDrop = async (folder) => {
+    if (!draggedItem) return;
+    try {
+      let endpoint = '';
+      let method = 'PUT';
+      let body = {};
+      if (draggedItem.type === 'document') {
+        endpoint = `${DOCUMENTS_ENDPOINT}/${draggedItem.id}/move`;
+        body = { folder_id: folder.id };
+      } else if (draggedItem.type === 'file') {
+        endpoint = `${FILES_ENDPOINT}/${draggedItem._id || draggedItem.id}`;
+        body = { folder_id: folder.id };
       }
-    }
-  };
-
-  // Delete handlers
-  const handleDeleteItem = async (itemId) => {
-    if (!window.confirm("Are you sure you want to delete this item?")) return;
-    try {
-      const res = await fetch(`${DOCUMENTS_ENDPOINT}/${itemId}`, {
-        method: "DELETE",
-        headers: getAuthHeaders(),
-      });
-      if (!res.ok) throw new Error("Failed to delete item");
-      setFiles(files => files.filter(f => f.id !== itemId));
-    } catch (err) {
-      alert(err.message || "Delete failed");
-    }
-  };
-
-  const handleDeleteFolder = async (folderId) => {
-    if (!window.confirm("Are you sure you want to delete this folder?")) return;
-    try {
-      const res = await fetch(`${FOLDERS_ENDPOINT}/${folderId}`, {
-        method: "DELETE",
-        headers: getAuthHeaders(),
-      });
-      if (!res.ok) throw new Error("Failed to delete folder");
-      setFolders(folders => folders.filter(f => f.id !== folderId));
-    } catch (err) {
-      alert(err.message || "Delete failed");
-    }
-  };
-
-  // Download handler (for files)
-  const handleDownloadFile = (file) => {
-    if (file.file_url) {
-      window.open(file.file_url, '_blank');
-    } else {
-      alert('No download URL available.');
-    }
-  };
-
-  // Info handler
-  const handleShowInfo = (item) => {
-    setInfoItem(item);
-    setOpenMenuId(null);
-  };
-
-  const handleCloseInfo = () => setInfoItem(null);
-
-  // Drag and drop: move file to folder
-  const handleMoveFileToFolder = async (fileId, folderId) => {
-    try {
-      const res = await fetch(`${FILES_ENDPOINT}/${fileId}`, {
-        method: 'PUT',
+      const res = await fetch(endpoint, {
+        method,
         headers: {
           ...getAuthHeaders(),
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ folder_id: folderId })
+        body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error('Failed to move file');
-      setFiles(files => files.map(f => f.id === fileId ? { ...f, folder_id: folderId } : f));
+      const data = await res.json();
+      console.log('Move response:', data);
+      if (!res.ok) throw new Error('Failed to move item');
+      setDraggedItem(null);
+      fetchData();
     } catch (err) {
       alert(err.message || 'Move failed');
     }
   };
 
+  // Share modal logic
+  const openShareModal = (item) => {
+    setShareTarget(item);
+    setShareEmails('');
+    setShareError('');
+    setShowShareModal(true);
+  };
+  const handleShare = async () => {
+    if (!shareTarget) return;
+    const emails = shareEmails.split(',').map(e => e.trim()).filter(Boolean);
+    const userIds = selectedTeamUsers;
+    const teamIds = selectedTeams;
+    if (emails.length === 0 && userIds.length === 0 && teamIds.length === 0) {
+      setShareError('Please select at least one team, team member, or enter at least one email.');
+      return;
+    }
+    try {
+      const endpoint = shareTarget.type === 'document'
+        ? `${DOCUMENTS_ENDPOINT}/${shareTarget.id}/share`
+        : `${FILES_ENDPOINT}/${shareTarget._id || shareTarget.id}/share`;
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emails, userIds, teamIds })
+      });
+      if (!res.ok) throw new Error('Failed to share');
+      setShowShareModal(false);
+      setShareTarget(null);
+      setShareEmails('');
+      setSelectedTeamUsers([]);
+      setSelectedTeams([]);
+      setShareError('');
+      if (activeTab === 'shared') fetchSharedItems();
+    } catch (err) {
+      setShareError(err.message);
+    }
+  };
+
+  const handleShowInfo = (item) => {
+    setInfoItem(item);
+    setShowInfoModal(true);
+  };
+
+  const handleDeleteItem = async (item) => {
+    if (!window.confirm(`Are you sure you want to delete '${item.name}'? This cannot be undone.`)) return;
+    let endpoint = '';
+    if (item.type === 'document') endpoint = `${DOCUMENTS_ENDPOINT}/${item.id}`;
+    else if (item.type === 'file') endpoint = `${FILES_ENDPOINT}/${item.id}`;
+    else if (item.type === 'folder') endpoint = `${FOLDERS_ENDPOINT}/${item.id}`;
+    try {
+      const res = await fetch(endpoint, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      });
+      if (!res.ok) throw new Error('Failed to delete');
+      fetchData();
+      setOpenMenuId(null);
+    } catch (err) {
+      alert('Error deleting item');
+    }
+  };
+
+  const handleDownloadItem = async (item) => {
+    let endpoint = '';
+    if (item.type === 'document') endpoint = `${DOCUMENTS_ENDPOINT}/${item.id}`;
+    else if (item.type === 'file') endpoint = `${FILES_ENDPOINT}/${item.id}`;
+    else return;
+    try {
+      const res = await fetch(endpoint, { headers: getAuthHeaders() });
+      if (!res.ok) throw new Error('Failed to fetch');
+      if (item.type === 'document') {
+        const data = await res.json();
+        const blob = new Blob([JSON.stringify(data.document, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${item.name || 'document'}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } else if (item.type === 'file') {
+        // Try to get file_url from API response or item
+        const data = await res.json();
+        const fileUrl = data.file?.file_url || item.file_url;
+        if (fileUrl) {
+          const a = document.createElement('a');
+          a.href = fileUrl;
+          a.download = item.name || 'file';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        } else {
+          alert('File URL not found');
+        }
+      }
+      setOpenMenuId(null);
+    } catch (err) {
+      alert('Error downloading item');
+    }
+  };
+
   return (
-    <div className="flex h-screen bg-gray-50">
-      <Sidebar />
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <Topbar />
-        <main className="flex-1 overflow-y-auto bg-white">
-          {/* Quick access section */}
-          <div className="px-6 py-4 border-b border-gray-200">
-            <div className="flex items-center space-x-4">
-              {QUICK_ACCESS_TABS.map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium ${
-                    activeTab === tab.id
-                      ? 'bg-gray-100 text-gray-900'
-                      : 'text-gray-600 hover:bg-gray-50'
-                  }`}
-                >
-                  <span className="text-lg">{tab.icon}</span>
-                  <span>{tab.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="px-6 py-4">
-            {/* Header with actions */}
-            <div className="flex justify-between items-center mb-6">
-              <div className="flex items-center space-x-4">
-                <h1 className="text-xl font-semibold text-gray-900">My Documents</h1>
-                {breadcrumbs.length > 0 && (
-                  <nav className="flex items-center text-sm text-gray-500 space-x-1">
-                    <button
-                      onClick={() => handleBreadcrumbClick(-1)}
-                      className="hover:text-blue-600 hover:underline"
-                    >
-                      Home
-                    </button>
-                    {breadcrumbs.map((crumb, idx) => (
-                      <React.Fragment key={crumb.id}>
-                        <span>/</span>
-                        <button
-                          onClick={() => handleBreadcrumbClick(idx)}
-                          className="hover:text-blue-600 hover:underline"
-                        >
-                          {crumb.name}
-                        </button>
-                      </React.Fragment>
-                    ))}
-                  </nav>
-                )}
-              </div>
-              
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => setShowNewFileMenu(!showNewFileMenu)}
-                  className="flex items-center px-3 py-1.5 bg-blue-600 text-white rounded-sm hover:bg-blue-700 text-sm font-medium"
-                >
-                  <FiPlusCircle className="mr-1.5 h-4 w-4" />
-                  New
-                </button>
-                
-                {showNewFileMenu && (
-                  <div ref={newFileMenuRef} className="absolute right-6 mt-32 w-48 bg-white rounded-sm shadow-lg py-1 z-10 border border-gray-200">
-                    <button
-                      onClick={() => handleNewItem('document')}
-                      className="flex items-center w-full px-4 py-2 text-sm text-left hover:bg-gray-50"
-                    >
-                      <FiFile className="mr-3 h-4 w-4 text-blue-600" />
-                      New Document
-                    </button>
-                    <button
-                      onClick={() => handleNewItem('upload')}
-                      className="flex items-center w-full px-4 py-2 text-sm text-left hover:bg-gray-50"
-                    >
-                      <FiUpload className="mr-3 h-4 w-4 text-blue-600" />
-                      Upload File
-                    </button>
-                    <button
-                      onClick={() => handleNewItem('folder')}
-                      className="flex items-center w-full px-4 py-2 text-sm text-left hover:bg-gray-50"
-                    >
-                      <FiFolderPlus className="mr-3 h-4 w-4 text-blue-600" />
-                      New Folder
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Error Message */}
-            {error && (
-              <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-sm">
-                <p className="text-sm text-red-800">{error}</p>
-              </div>
-            )}
-
-            {/* Loading State */}
-            {isFetching && (
-              <div className="flex justify-center items-center py-8">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-              </div>
-            )}
-
-            {/* Back button if inside a folder */}
-            {currentFolder && (
-              <button
-                onClick={handleBack}
-                className="mb-4 px-3 py-1.5 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 text-sm font-medium"
-              >
-                ← Back
-              </button>
-            )}
-
-            {/* Content Grid */}
-            {!isFetching && getCombinedItems().length > 0 ? (
-              getCombinedItems().length <= 20 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
-                  {getCombinedItems().map((item, idx) => (
-                    item.type === 'folder' ? (
-                      <LocalFolderCard
-                        key={`folder-${item.id}`}
-                        folder={item}
-                        onClick={() => handleFolderClick(item.id, item.name)}
-                        onDrop={e => {
-                          e.preventDefault();
-                          const fileId = e.dataTransfer.getData('fileId');
-                          if (fileId) handleMoveFileToFolder(fileId, item.id);
-                        }}
-                        onDragOver={e => e.preventDefault()}
-                        style={{}}
-                      >
-                        <div className="p-3">
-                          <h3 className="text-sm font-medium text-gray-900 truncate group-hover:text-blue-600">
-                            {item.title || item.name || item.file_name}
-                          </h3>
-                          <p className="text-xs text-gray-500 mt-1">
-                            {new Date(item.date).toLocaleDateString()}
-                          </p>
-                        </div>
-                        {/* Ellipsis menu button and dropdown menu */}
-                        <button
-                          className="absolute top-2 right-2 p-1 text-gray-400 hover:text-gray-600 group-hover:opacity-100 transition-opacity"
-                          onClick={e => {
-                            e.stopPropagation();
-                            setOpenMenuId(openMenuId === `folder-${item.id}` ? null : `folder-${item.id}`);
-                          }}
-                        >
-                          <FaEllipsisV className="h-4 w-4" />
-                        </button>
-                        {openMenuId === `folder-${item.id}` && (
-                          <div className="absolute right-2 top-8 z-20 bg-white border border-gray-200 rounded shadow-md w-36">
-                            <button
-                              className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
-                              onClick={e => { e.stopPropagation(); handleShowInfo(item); }}
-                            >
-                              Info
-                            </button>
-                            <button
-                              className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50"
-                              onClick={e => { e.stopPropagation(); handleDeleteItem(item.id); setOpenMenuId(null); }}
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        )}
-                      </LocalFolderCard>
-                    ) : (
-                      <FileCard
-                        key={`file-${item.id}`}
-                        file={item}
-                        onClick={() => handleFileClick(item)}
-                        onDragStart={e => {
-                          e.dataTransfer.setData('fileId', item.id);
-                        }}
-                        style={{}}
-                      >
-                        <div className="p-3">
-                          <h3 className="text-sm font-medium text-gray-900 truncate group-hover:text-blue-600">
-                            {item.title || item.name || item.file_name}
-                          </h3>
-                          <p className="text-xs text-gray-500 mt-1">
-                            {new Date(item.date).toLocaleDateString()}
-                          </p>
-                        </div>
-                        {/* Ellipsis menu button and dropdown menu */}
-                        <button
-                          className="absolute top-2 right-2 p-1 text-gray-400 hover:text-gray-600 group-hover:opacity-100 transition-opacity"
-                          onClick={e => {
-                            e.stopPropagation();
-                            setOpenMenuId(openMenuId === `file-${item.id}` ? null : `file-${item.id}`);
-                          }}
-                        >
-                          <FaEllipsisV className="h-4 w-4" />
-                        </button>
-                        {openMenuId === `file-${item.id}` && (
-                          <div className="absolute right-2 top-8 z-20 bg-white border border-gray-200 rounded shadow-md w-36">
-                            <button
-                              className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
-                              onClick={e => { e.stopPropagation(); handleDownloadFile(item); setOpenMenuId(null); }}
-                            >
-                              Download
-                            </button>
-                            <button
-                              className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
-                              onClick={e => { e.stopPropagation(); handleShowInfo(item); }}
-                            >
-                              Info
-                            </button>
-                            <button
-                              className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50"
-                              onClick={e => { e.stopPropagation(); handleDeleteItem(item.id); setOpenMenuId(null); }}
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        )}
-                      </FileCard>
-                    )
-                  ))}
-                </div>
-              ) : (
-                <Grid
-                  columnCount={4}
-                  columnWidth={250}
-                  height={600}
-                  rowCount={Math.ceil(getCombinedItems().length / 4)}
-                  rowHeight={160}
-                  width={1040}
-                >
-                  {({ columnIndex, rowIndex, style }) => {
-                    const items = getCombinedItems();
-                    const itemIndex = rowIndex * 4 + columnIndex;
-                    if (itemIndex >= items.length) return null;
-                    const item = items[itemIndex];
-                    if (item.type === 'folder') {
-                      return (
-                        <LocalFolderCard
-                          key={`folder-${item.id}`}
-                          folder={item}
-                          onClick={() => handleFolderClick(item.id, item.name)}
-                          onDrop={e => {
-                            e.preventDefault();
-                            const fileId = e.dataTransfer.getData('fileId');
-                            if (fileId) handleMoveFileToFolder(fileId, item.id);
-                          }}
-                          onDragOver={e => e.preventDefault()}
-                          style={style}
-                        >
-                          <div className="p-3">
-                            <h3 className="text-sm font-medium text-gray-900 truncate group-hover:text-blue-600">
-                              {item.title || item.name || item.file_name}
-                            </h3>
-                            <p className="text-xs text-gray-500 mt-1">
-                              {new Date(item.date).toLocaleDateString()}
-                            </p>
-                          </div>
-                          {/* Ellipsis menu button and dropdown menu */}
-                          <button
-                            className="absolute top-2 right-2 p-1 text-gray-400 hover:text-gray-600 group-hover:opacity-100 transition-opacity"
-                            onClick={e => {
-                              e.stopPropagation();
-                              setOpenMenuId(openMenuId === `folder-${item.id}` ? null : `folder-${item.id}`);
-                            }}
-                          >
-                            <FaEllipsisV className="h-4 w-4" />
-                          </button>
-                          {openMenuId === `folder-${item.id}` && (
-                            <div className="absolute right-2 top-8 z-20 bg-white border border-gray-200 rounded shadow-md w-36">
-                              <button
-                                className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
-                                onClick={e => { e.stopPropagation(); handleShowInfo(item); }}
-                              >
-                                Info
-                              </button>
-                              <button
-                                className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50"
-                                onClick={e => { e.stopPropagation(); handleDeleteItem(item.id); setOpenMenuId(null); }}
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          )}
-                        </LocalFolderCard>
-                      );
-                    } else {
-                      return (
-                        <FileCard
-                          key={`file-${item.id}`}
-                          file={item}
-                          onClick={() => handleFileClick(item)}
-                          onDragStart={e => {
-                            e.dataTransfer.setData('fileId', item.id);
-                          }}
-                          style={style}
-                        >
-                          <div className="p-3">
-                            <h3 className="text-sm font-medium text-gray-900 truncate group-hover:text-blue-600">
-                              {item.title || item.name || item.file_name}
-                            </h3>
-                            <p className="text-xs text-gray-500 mt-1">
-                              {new Date(item.date).toLocaleDateString()}
-                            </p>
-                          </div>
-                          {/* Ellipsis menu button and dropdown menu */}
-                          <button
-                            className="absolute top-2 right-2 p-1 text-gray-400 hover:text-gray-600 group-hover:opacity-100 transition-opacity"
-                            onClick={e => {
-                              e.stopPropagation();
-                              setOpenMenuId(openMenuId === `file-${item.id}` ? null : `file-${item.id}`);
-                            }}
-                          >
-                            <FaEllipsisV className="h-4 w-4" />
-                          </button>
-                          {openMenuId === `file-${item.id}` && (
-                            <div className="absolute right-2 top-8 z-20 bg-white border border-gray-200 rounded shadow-md w-36">
-                              <button
-                                className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
-                                onClick={e => { e.stopPropagation(); handleDownloadFile(item); setOpenMenuId(null); }}
-                              >
-                                Download
-                              </button>
-                              <button
-                                className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
-                                onClick={e => { e.stopPropagation(); handleShowInfo(item); }}
-                              >
-                                Info
-                              </button>
-                              <button
-                                className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50"
-                                onClick={e => { e.stopPropagation(); handleDeleteItem(item.id); setOpenMenuId(null); }}
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          )}
-                        </FileCard>
-                      );
-                    }
-                  }}
-                </Grid>
-              )
-            ) : !isFetching && (
-              <div className="text-center py-12">
-                <FaFolder className="mx-auto h-12 w-12 text-gray-300" />
-                <h3 className="mt-2 text-sm font-medium text-gray-900">No documents or folders</h3>
-                <p className="mt-1 text-sm text-gray-500">
-                  Get started by creating a new document or uploading a file.
-                </p>
+    <div className="p-6">
+      {/* Tabs and actions */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center space-x-2">
+          {TABS.map(tab => (
+            <button
+              key={tab.id}
+              className={`px-4 py-1.5 rounded-full font-medium text-sm transition-colors ${activeTab === tab.id ? 'bg-black text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
+          <div className="relative" ref={plusMenuRef}>
+            <button
+              className="ml-2 px-3 py-1.5 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700 text-lg flex items-center"
+              onClick={() => setShowPlusMenu(v => !v)}
+            >
+              <FaPlus />
+            </button>
+            {showPlusMenu && (
+              <div className="absolute left-0 mt-2 w-44 bg-white border border-gray-200 rounded shadow-lg z-10">
+                <button className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => handlePlusMenu('new-doc')}>New Document</button>
+                <button className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => handlePlusMenu('new-folder')}>New Folder</button>
+                <button className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => handlePlusMenu('upload')}>Upload File</button>
               </div>
             )}
           </div>
-        </main>
+        </div>
+        <div className="flex items-center space-x-2">
+          <button className="p-2 rounded hover:bg-gray-100" title="Upload" onClick={() => navigate('/upload')}>
+            <FaUpload />
+          </button>
+          <button className={`p-2 rounded hover:bg-gray-100 ${viewStyle === 'list' ? 'bg-gray-200' : ''}`} title="List view" onClick={() => setViewStyle('list')}>
+            <FaThList />
+          </button>
+          <button className={`p-2 rounded hover:bg-gray-100 ${viewStyle === 'grid' ? 'bg-gray-200' : ''}`} title="Grid view" onClick={() => setViewStyle('grid')}>
+            <FaThLarge />
+          </button>
+        </div>
       </div>
+
+      {/* Table/List or Grid */}
+      {viewStyle === 'list' ? (
+        <div className="bg-white rounded-lg shadow border border-gray-100 overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="text-gray-500 border-b">
+                <th className="py-3 px-4 text-left font-normal"> </th>
+                <th className="py-3 px-4 text-left font-normal">Name</th>
+                <th className="py-3 px-4 text-left font-normal">Date</th>
+                <th className="py-3 px-4 text-left font-normal">Status</th>
+                <th className="py-3 px-4 text-right font-normal">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading ? (
+                <tr><td colSpan={4} className="py-8 text-center">Loading...</td></tr>
+              ) : error ? (
+                <tr><td colSpan={4} className="py-8 text-center text-red-500">{error}</td></tr>
+              ) : listData.length === 0 ? (
+                <tr><td colSpan={4} className="py-8 text-center text-gray-400">No items found.</td></tr>
+              ) : (
+                listData.map(item => (
+                  <tr
+                    key={item._id || item.id}
+                    className={`hover:bg-gray-50 cursor-pointer border-b ${draggedItem && draggedItem._id === (item._id || item.id) ? 'opacity-50' : ''}`}
+                    onClick={() => handleRowClick(item)}
+                    draggable={item.type === 'file' || item.type === 'document'}
+                    onDragStart={item.type === 'file' || item.type === 'document' ? () => handleDragStart(item) : undefined}
+                    onDragEnd={item.type === 'file' || item.type === 'document' ? handleDragEnd : undefined}
+                    onDragOver={item.type === 'folder' ? handleDragOver : undefined}
+                    onDrop={item.type === 'folder' ? (e) => { e.stopPropagation(); handleDrop(item); } : undefined}
+                  >
+                    <td className="py-3 px-4">
+                      {item.type === 'folder' ? <FaFolder className="text-yellow-400 text-lg" /> : <FaFileAlt className="text-blue-400 text-lg" />}
+                    </td>
+                    <td className="py-3 px-4 font-medium">{item.name}</td>
+                    <td className="py-3 px-4">{item.date ? new Date(item.date).toLocaleDateString() : ''}</td>
+                    <td className="py-3 px-4 text-gray-500">{item.status}</td>
+                    <td className="py-3 px-4 text-right">
+                      <ItemMenu
+                        item={item}
+                        onShare={openShareModal}
+                        onDownload={handleDownloadItem}
+                        onInfo={handleShowInfo}
+                        onDelete={handleDeleteItem}
+                        openMenuId={openMenuId}
+                        setOpenMenuId={setOpenMenuId}
+                      />
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 bg-white rounded-lg shadow border border-gray-100 p-6">
+          {isLoading ? (
+            <div className="col-span-full text-center py-8">Loading...</div>
+          ) : error ? (
+            <div className="col-span-full text-center text-red-500 py-8">{error}</div>
+          ) : listData.length === 0 ? (
+            <div className="col-span-full text-center text-gray-400 py-8">No items found.</div>
+          ) : (
+            listData.map(item => (
+              <div
+                key={item._id || item.id}
+                className={`flex flex-col items-center justify-center p-4 rounded-lg border hover:shadow cursor-pointer transition ${draggedItem && draggedItem._id === (item._id || item.id) ? 'opacity-50' : ''}`}
+                onClick={() => handleRowClick(item)}
+                draggable={item.type === 'file' || item.type === 'document'}
+                onDragStart={item.type === 'file' || item.type === 'document' ? () => handleDragStart(item) : undefined}
+                onDragEnd={item.type === 'file' || item.type === 'document' ? handleDragEnd : undefined}
+                onDragOver={item.type === 'folder' ? handleDragOver : undefined}
+                onDrop={item.type === 'folder' ? (e) => { e.stopPropagation(); handleDrop(item); } : undefined}
+              >
+                <div className="mb-2">
+                  {item.type === 'folder' ? <FaFolder className="text-yellow-400 text-2xl" /> : <FaFileAlt className="text-blue-400 text-2xl" />}
+                </div>
+                <div className="font-medium text-center truncate w-full" title={item.name}>{item.name}</div>
+                <div className="text-xs text-gray-500 mt-1">{item.date ? new Date(item.date).toLocaleDateString() : ''}</div>
+                <div className="text-xs text-gray-400 mt-1">{item.status}</div>
+                <div className="text-right">
+                  <ItemMenu
+                    item={item}
+                    onShare={openShareModal}
+                    onDownload={handleDownloadItem}
+                    onInfo={handleShowInfo}
+                    onDelete={handleDeleteItem}
+                    openMenuId={openMenuId}
+                    setOpenMenuId={setOpenMenuId}
+                  />
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
 
       {/* New Folder Modal */}
       {showFolderModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center">
-          <div className="bg-white rounded-sm p-6 w-96 shadow-lg">
-            <h2 className="text-lg font-medium text-gray-900 mb-4">Create New Folder</h2>
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+          <div className="bg-white rounded p-6 w-96 shadow-lg">
+            <h2 className="text-lg font-medium mb-4">Create New Folder</h2>
             <input
               type="text"
               value={newFolderName}
-              onChange={(e) => setNewFolderName(e.target.value)}
+              onChange={e => setNewFolderName(e.target.value)}
               placeholder="Folder name"
-              className="w-full px-3 py-2 border border-gray-300 rounded-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+              autoFocus
             />
-            {folderError && (
-              <p className="text-sm text-red-600 mt-2">{folderError}</p>
-            )}
+            {folderError && <p className="text-sm text-red-600 mt-2">{folderError}</p>}
             <div className="flex justify-end space-x-3 mt-6">
-              <button
-                onClick={() => {
-                  setShowFolderModal(false);
-                  setNewFolderName("");
-                  setFolderError("");
-                }}
-                className="px-4 py-2 text-sm text-gray-700 hover:text-gray-900"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => createNewFolder(newFolderName)}
-                className="px-4 py-2 text-sm bg-blue-600 text-white rounded-sm hover:bg-blue-700"
-              >
-                Create
-              </button>
+              <button onClick={() => { setShowFolderModal(false); setNewFolderName(""); setFolderError(""); }} className="px-4 py-2 text-sm text-gray-700 hover:text-gray-900">Cancel</button>
+              <button onClick={createNewFolder} className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">Create</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* New File Modal with Extension Selection */}
-      {showNewFileModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center">
-          <div className="bg-white rounded-sm p-6 w-96 shadow-lg">
-            <h2 className="text-lg font-medium text-gray-900 mb-4">Create New Document</h2>
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="fileName" className="block text-sm font-medium text-gray-700 mb-1">
-                  File Name
-                </label>
-                <input
-                  id="fileName"
-                  type="text"
-                  value={newFileName}
-                  onChange={(e) => setNewFileName(e.target.value)}
-                  placeholder="Enter file name"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                  autoFocus
-                />
-              </div>
-              
-              <div>
-                <label htmlFor="fileExtension" className="block text-sm font-medium text-gray-700 mb-1">
-                  File Type
-                </label>
-                <select
-                  id="fileExtension"
-                  value={fileExtension}
-                  onChange={(e) => setFileExtension(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  {ALLOWED_EXTENSIONS.map(ext => (
-                    <option key={ext} value={ext}>
-                      {ext.toUpperCase()} Document
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {fileError && (
-              <p className="text-sm text-red-600 mt-2">{fileError}</p>
-            )}
-
+      {/* New Document Modal */}
+      {showDocModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+          <div className="bg-white rounded p-6 w-96 shadow-lg">
+            <h2 className="text-lg font-medium mb-4">Create New Document</h2>
+            <input
+              type="text"
+              value={newDocName}
+              onChange={e => setNewDocName(e.target.value)}
+              placeholder="Document name"
+              className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+              autoFocus
+            />
+            {docError && <p className="text-sm text-red-600 mt-2">{docError}</p>}
             <div className="flex justify-end space-x-3 mt-6">
-              <button
-                onClick={() => {
-                  setShowNewFileModal(false);
-                  setNewFileName("");
-                  setFileError("");
-                }}
-                className="px-4 py-2 text-sm text-gray-700 hover:text-gray-900"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => createNewDocument(newFileName)}
-                className="px-4 py-2 text-sm bg-blue-600 text-white rounded-sm hover:bg-blue-700"
-              >
-                Create
-              </button>
+              <button onClick={() => { setShowDocModal(false); setNewDocName(""); setDocError(""); }} className="px-4 py-2 text-sm text-gray-700 hover:text-gray-900">Cancel</button>
+              <button onClick={createNewDocument} className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">Create</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Loading Indicator */}
-      {isLoading && (
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center">
-          <div className="bg-white rounded-sm p-4 flex items-center space-x-3">
-            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
-            <span className="text-sm text-gray-600">Creating document...</span>
+      {/* Share Modal */}
+      {showShareModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+          <div className="bg-white rounded p-6 w-96 shadow-lg">
+            <h2 className="text-lg font-medium mb-4">Share {shareTarget?.name}</h2>
+            <div className="flex space-x-2 mb-4">
+              <button className={`px-3 py-1 rounded ${shareTab==='team'?'bg-blue-600 text-white':'bg-gray-100 text-gray-700'}`} onClick={()=>setShareTab('team')}>Team</button>
+              <button className={`px-3 py-1 rounded ${shareTab==='email'?'bg-blue-600 text-white':'bg-gray-100 text-gray-700'}`} onClick={()=>setShareTab('email')}>Email</button>
+            </div>
+            {shareTab==='team' ? (
+              <div className="mb-4 max-h-40 overflow-y-auto">
+                {/* Team selection */}
+                {teams.length === 0 ? <div className="text-gray-400 text-sm">No teams found.</div> : (
+                  <div className="mb-2">
+                    <div className="text-xs text-gray-500 mb-1">Share with entire team:</div>
+                    {teams.map(team => (
+                      <label key={team.id} className="flex items-center space-x-2 mb-1">
+                        <input type="checkbox" checked={selectedTeams.includes(team.id)} onChange={e => setSelectedTeams(v => e.target.checked ? [...v, team.id] : v.filter(id => id !== team.id))} />
+                        <span className="font-semibold text-blue-700">{team.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+                {/* Individual member selection (as before) */}
+                {teamUsers.length === 0 ? <div className="text-gray-400 text-sm">No team members found.</div> : teamUsers.map(u => (
+                  <label key={u.id} className="flex items-center space-x-2 mb-1">
+                    <input type="checkbox" checked={selectedTeamUsers.includes(u.id)} onChange={e => setSelectedTeamUsers(v => e.target.checked ? [...v, u.id] : v.filter(id => id !== u.id))} />
+                    <span>{u.name || u.username || u.email}</span>
+                  </label>
+                ))}
+              </div>
+            ) : (
+              <input type="text" value={shareEmails} onChange={e => setShareEmails(e.target.value)} placeholder="Enter emails, comma separated" className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500" autoFocus />
+            )}
+            {shareError && <p className="text-sm text-red-600 mt-2">{shareError}</p>}
+            <div className="flex justify-end space-x-3 mt-6">
+              <button onClick={() => setShowShareModal(false)} className="px-4 py-2 text-sm text-gray-700 hover:text-gray-900">Cancel</button>
+              <button onClick={handleShare} className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">Share</button>
+            </div>
           </div>
         </div>
       )}
 
       {/* Info Modal */}
-      {infoItem && (
+      {showInfoModal && infoItem && (
         <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-          <div className="bg-white rounded p-6 w-96 shadow-lg relative">
-            <button
-              className="absolute top-2 right-2 text-gray-400 hover:text-gray-600"
-              onClick={handleCloseInfo}
-            >
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-            <h2 className="text-lg font-semibold mb-4">Item Info</h2>
-            <div className="space-y-2">
-              <div><span className="font-medium">Type:</span> {infoItem.type}</div>
-              <div><span className="font-medium">Name:</span> {infoItem.title || infoItem.name || infoItem.file_name}</div>
-              {infoItem.uploaded_at && <div><span className="font-medium">Uploaded at:</span> {new Date(infoItem.uploaded_at).toLocaleString()}</div>}
-              {infoItem.created_at && <div><span className="font-medium">Created at:</span> {new Date(infoItem.created_at).toLocaleString()}</div>}
-              {infoItem.createdAt && <div><span className="font-medium">Created at:</span> {new Date(infoItem.createdAt).toLocaleString()}</div>}
-              {infoItem.updatedAt && <div><span className="font-medium">Updated at:</span> {new Date(infoItem.updatedAt).toLocaleString()}</div>}
-              {infoItem.user_id && <div><span className="font-medium">Uploaded by (user id):</span> {infoItem.user_id}</div>}
-              {infoItem.userId && <div><span className="font-medium">Uploaded by (user id):</span> {infoItem.userId}</div>}
-              {infoItem.file_url && <div><span className="font-medium">File URL:</span> <a href={infoItem.file_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline break-all">Open</a></div>}
+          <div className="bg-white rounded p-6 w-96 shadow-lg">
+            <h2 className="text-lg font-medium mb-4">Item Info</h2>
+            <div className="mb-4">
+              <div><b>Name:</b> {infoItem.name}</div>
+              <div><b>Type:</b> {infoItem.type}</div>
+              {infoItem.date && <div><b>Date:</b> {new Date(infoItem.date).toLocaleString()}</div>}
+              {infoItem.size && <div><b>Size:</b> {infoItem.size} bytes</div>}
+              {infoItem.owner && <div><b>Owner:</b> {infoItem.owner}</div>}
+              {infoItem.status && <div><b>Status:</b> {infoItem.status}</div>}
+              {infoItem.file_url && <div><b>File URL:</b> <a href={infoItem.file_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">Open</a></div>}
+            </div>
+            <div className="flex justify-end">
+              <button onClick={() => setShowInfoModal(false)} className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">Close</button>
             </div>
           </div>
         </div>

@@ -26,6 +26,21 @@ const documentRouter = require("./routes/document");
 const nodemailer = require("nodemailer");
 const File = require("./src/entities/File.js");
 const Folder = require("./src/entities/Folder.js");
+const Team = require("./src/entities/Team.js");
+const { EntitySchema } = require("typeorm");
+const Invitation = new EntitySchema({
+  name: "Invitation",
+  tableName: "invitations",
+  columns: {
+    id: { primary: true, type: "varchar", length: 255, generated: "uuid" },
+    teamId: { type: "varchar", length: 255 },
+    inviteeId: { type: "varchar", length: 255 },
+    status: { type: "varchar", length: 32, default: "pending" },
+    createdAt: { type: "datetime", createDate: true }
+  }
+});
+const { In } = require("typeorm");
+const Message = require("./src/entities/Message.js");
 
 const app = express();
 app.use(express.json({ limit: '20mb' }));
@@ -36,14 +51,16 @@ const server = http.createServer(app);
 
 // ✅ CORS Configuration
 app.use(cors({
-  origin: 'http://localhost:3000',
-  credentials: true
+  origin: ['http://localhost:3000', 'ws://localhost:1234'],
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  exposedHeaders: ['Authorization']
 }));
 
 // Initialize Socket.IO with CORS
 const io = socketIo(server, {
   cors: {
-    origin: "http://localhost:3000",
+    origin: ["http://localhost:3000", "ws://localhost:1234"],
     methods: ["GET", "POST"],
     credentials: true,
   },
@@ -196,10 +213,16 @@ app.post("/register", async (req, res) => {
   try {
     const userRepo = AppDataSource.getRepository(User);
 
-    // Check if user exists
+    // Check if email exists
     const existingUser = await userRepo.findOne({ where: { email } });
     if (existingUser) {
       return res.status(400).json({ message: "Email already exists" });
+    }
+
+    // Check if username exists
+    const existingUsername = await userRepo.findOne({ where: { username } });
+    if (existingUsername) {
+      return res.status(400).json({ message: "Username already exists" });
     }
 
     // Hash Password
@@ -431,15 +454,25 @@ app.post("/upload", authenticate, upload.single("file"), async (req, res) => {
   }
 });
 
-// ✅ Get all files for the current user
+// Get all files for the current user
 app.get("/files", authenticate, async (req, res) => {
   try {
     const fileRepo = AppDataSource.getRepository(File);
     const query = { user_id: req.user.id };
     
-    // Add folder_id filter if provided
-    if (req.query.folder_id) {
+    // If root=true, only get files without a folder
+    // If folder_id is provided, only get files in that folder
+    // This ensures files are only shown in one place
+    if (req.query.root === 'true') {
+      query.folder_id = null; // Only get files without a folder
+      console.log('Fetching root files:', query);
+    } else if (req.query.folder_id) {
       query.folder_id = req.query.folder_id;
+      console.log('Fetching folder files:', query);
+    } else {
+      // If neither root nor folder_id specified, return empty array
+      console.log('No root or folder_id specified, returning empty array');
+      return res.json({ files: [] });
     }
     
     const files = await fileRepo.find({
@@ -447,18 +480,10 @@ app.get("/files", authenticate, async (req, res) => {
       order: { uploaded_at: "DESC" }
     });
 
-    // Ensure each file has a valid S3 URL
-    const filesWithUrls = files.map(file => ({
-      ...file,
-      file_url: file.file_url || (file.s3Key ? 
-        `https://${process.env.REACT_APP_AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION || 'ap-southeast-2'}.amazonaws.com/${file.s3Key}` 
-        : null)
-    }));
-
-    console.log('📄 Returning files:', filesWithUrls.length);
-    res.json({ files: filesWithUrls });
+    console.log(`Found ${files.length} files for query:`, query);
+    res.json({ files });
   } catch (error) {
-    console.error("❌ Get files error:", error);
+    console.error("Get files error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 });
@@ -466,6 +491,83 @@ app.get("/files", authenticate, async (req, res) => {
 /* ================================
         📄 DOCUMENT ROUTES
 ================================ */
+
+// Get all documents for the current user
+app.get("/documents", authenticate, async (req, res) => {
+  try {
+    const documentRepo = AppDataSource.getRepository(Document);
+    const query = { userId: req.user.id };
+    // If root=true, only get documents without a folder
+    // If folder_id is provided, only get documents in that folder
+    // This ensures documents are only shown in one place
+    if (req.query.root === 'true') {
+      query.folder_id = null; // Only get documents without a folder
+      console.log('Fetching root documents:', query);
+    } else if (req.query.folder_id) {
+      query.folder_id = req.query.folder_id;
+      console.log('Fetching folder documents:', query);
+    } else {
+      // If neither root nor folder_id specified, return empty array
+      console.log('No root or folder_id specified, returning empty array');
+      return res.json({ documents: [] });
+    }
+    const documents = await documentRepo.find({
+      where: query,
+      order: { createdAt: "DESC" }
+    });
+    console.log(`Found ${documents.length} documents for query:`, query);
+    res.json({ documents });
+  } catch (error) {
+    console.error("Get documents error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+// Get all folders for the current user
+app.get("/folders", authenticate, async (req, res) => {
+  try {
+    const folderRepo = AppDataSource.getRepository(Folder);
+    const fileRepo = AppDataSource.getRepository(File);
+    const documentRepo = AppDataSource.getRepository(Document);
+    const query = { user_id: req.user.id };
+    
+    // Add parent_id filter if provided
+    if (req.query.parent_id) {
+      query.parent_id = req.query.parent_id;
+    }
+    
+    // Get folders
+    const folders = await folderRepo.find({
+      where: query,
+      order: { created_at: "DESC" }
+    });
+
+    // Get item counts for each folder
+    const foldersWithCounts = await Promise.all(folders.map(async folder => {
+      // Count files in this folder
+      const fileCount = await fileRepo.count({
+        where: { folder_id: folder.id }
+      });
+
+      // Count documents in this folder
+      const documentCount = await documentRepo.count({
+        where: { folder_id: folder.id }
+      });
+
+      // Add total count to folder object
+      return {
+        ...folder,
+        items: fileCount + documentCount
+      };
+    }));
+    
+    console.log(`📁 Found ${foldersWithCounts.length} folders for user ${req.user.id}`);
+    res.json({ folders: foldersWithCounts });
+  } catch (error) {
+    console.error("❌ Get folders error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
 
 // Use document router
 app.use("/documents", documentRouter);
@@ -476,6 +578,17 @@ app.use("/documents", documentRouter);
 
 // Track active users in documents
 const documentUsers = {};
+
+// Helper to enrich message with username and email
+async function enrichMessageWithUser(message) {
+  const userRepo = AppDataSource.getRepository("User");
+  const user = await userRepo.findOne({ where: { id: message.userId } });
+  return {
+    ...message,
+    username: user ? user.username : "Unknown",
+    email: user ? user.email : ""
+  };
+}
 
 io.on('connection', socket => {
   console.log('🔄 New client connected:', socket.id);
@@ -578,6 +691,37 @@ io.on('connection', socket => {
       }
     });
   });
+
+  // Team chat: join a team chat room
+  socket.on('join-team-chat', async ({ teamId, userId }) => {
+    socket.join(`team-chat-${teamId}`);
+    try {
+      const messageRepo = AppDataSource.getRepository("Message");
+      const messages = await messageRepo.find({
+        where: { teamId },
+        order: { createdAt: "ASC" },
+        take: 50
+      });
+      // Enrich messages with username
+      const enriched = await Promise.all(messages.map(enrichMessageWithUser));
+      socket.emit('team-message-history', enriched);
+    } catch (err) {
+      socket.emit('team-message-history', []);
+    }
+  });
+
+  // Team chat: send a message
+  socket.on('send-team-message', async ({ teamId, userId, message }) => {
+    try {
+      const messageRepo = AppDataSource.getRepository("Message");
+      const newMsg = messageRepo.create({ teamId, userId, message });
+      await messageRepo.save(newMsg);
+      const enriched = await enrichMessageWithUser(newMsg);
+      io.to(`team-chat-${teamId}`).emit('team-message', enriched);
+    } catch (err) {
+      // Optionally handle error
+    }
+  });
 });
 
 // Helper function for leaving a document
@@ -662,28 +806,6 @@ app.post("/folders", authenticate, async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Create folder error:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
-  }
-});
-
-// ✅ List all folders for the current user
-app.get("/folders", authenticate, async (req, res) => {
-  try {
-    const folderRepo = AppDataSource.getRepository(Folder);
-    const query = { user_id: req.user.id };
-    
-    // Add parent_id filter if provided
-    if (req.query.parent_id) {
-      query.parent_id = req.query.parent_id;
-    }
-    
-    const folders = await folderRepo.find({
-      where: query,
-      order: { created_at: "DESC" }
-    });
-    res.json({ folders });
-  } catch (error) {
-    console.error("❌ List folders error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 });
@@ -822,5 +944,364 @@ app.get("/all-files", authenticate, async (req, res) => {
   } catch (error) {
     console.error("❌ Get all files and documents error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+/* ================================
+        🟢 TEAM ROUTES
+================================ */
+
+// Get all teams for the authenticated user
+app.get("/api/teams", authenticate, async (req, res) => {
+  try {
+    const teamRepo = AppDataSource.getRepository("Team");
+    const userId = req.user.id;
+    // Step 1: Get all team IDs where the user is a member or creator (raw SQL)
+    const teamIdsResult = await teamRepo.query(
+      `SELECT DISTINCT t.id FROM teams t
+       LEFT JOIN team_members tm ON t.id = tm.team_id
+       WHERE t.creator_id = ? OR tm.user_id = ?`,
+      [userId, userId]
+    );
+    const teamIds = teamIdsResult.map(row => row.id);
+    // Step 2: Fetch all teams with all members and creator
+    const teams = teamIds.length > 0
+      ? await teamRepo.find({ where: { id: In(teamIds) }, relations: ["members", "creator"] })
+      : [];
+    // Step 3: Debug log for raw members
+    teams.forEach(team => {
+      console.log(`Raw members for team ${team.id}:`, JSON.stringify(team.members, null, 2));
+    });
+    // Step 4: Format as before
+    const formattedTeams = teams.map(team => ({
+      id: team.id,
+      name: team.name,
+      creatorId: team.creatorId,
+      creator: team.creator,
+      createdAt: team.createdAt,
+      members: team.members.map(m => ({ id: m.id, name: m.username || m.name, email: m.email }))
+    }));
+    console.log('Teams for user', userId, JSON.stringify(formattedTeams, null, 2));
+    res.json({ teams: formattedTeams });
+  } catch (error) {
+    console.error("❌ Error fetching teams:", error);
+    res.status(500).json({ message: "Failed to fetch teams", error: error.message });
+  }
+});
+
+// Create a new team
+app.post("/api/teams", authenticate, async (req, res) => {
+  try {
+    const { name } = req.body;
+    const teamRepo = AppDataSource.getRepository("Team");
+    const userRepo = AppDataSource.getRepository("User");
+    const creator = await userRepo.findOne({ where: { id: req.user.id } });
+    if (!creator) return res.status(404).json({ message: "User not found" });
+    const team = teamRepo.create({ name, creatorId: creator.id, creator, members: [creator] });
+    await teamRepo.save(team);
+    const savedTeam = await teamRepo.findOne({ where: { id: team.id }, relations: ["members", "creator"] });
+    res.status(201).json({ team: savedTeam });
+  } catch (error) {
+    console.error("❌ Error creating team:", error);
+    res.status(500).json({ message: "Failed to create team", error: error.message });
+  }
+});
+
+// Add a member to a team
+app.post("/api/teams/:teamId/members", authenticate, async (req, res) => {
+  try {
+    const { email } = req.body;
+    const teamRepo = AppDataSource.getRepository("Team");
+    const userRepo = AppDataSource.getRepository("User");
+    const team = await teamRepo.findOne({ where: { id: req.params.teamId }, relations: ["members", "creator"] });
+    if (!team) return res.status(404).json({ message: "Team not found" });
+    if (team.creatorId !== req.user.id && !team.members.some(m => m.id === req.user.id)) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+    const userToAdd = await userRepo.findOne({ where: { email } });
+    if (!userToAdd) return res.status(404).json({ message: "User not found" });
+    if (team.members.some(m => m.id === userToAdd.id)) {
+      return res.status(400).json({ message: "User is already a member" });
+    }
+    team.members.push(userToAdd);
+    await teamRepo.save(team);
+    const updatedTeam = await teamRepo.findOne({ where: { id: team.id }, relations: ["members", "creator"] });
+    res.json({ team: updatedTeam });
+  } catch (error) {
+    console.error("❌ Error adding member:", error);
+    res.status(500).json({ message: "Failed to add member", error: error.message });
+  }
+});
+
+// Remove a member from a team
+app.delete("/api/teams/:teamId/members/:memberId", authenticate, async (req, res) => {
+  try {
+    const teamRepo = AppDataSource.getRepository("Team");
+    const team = await teamRepo.findOne({ where: { id: req.params.teamId }, relations: ["members", "creator"] });
+    if (!team) return res.status(404).json({ message: "Team not found" });
+    if (team.creatorId !== req.user.id) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+    if (req.params.memberId === team.creatorId) {
+      return res.status(400).json({ message: "Cannot remove team creator" });
+    }
+    team.members = team.members.filter(m => m.id !== req.params.memberId);
+    await teamRepo.save(team);
+    const updatedTeam = await teamRepo.findOne({ where: { id: team.id }, relations: ["members", "creator"] });
+    res.json({ team: updatedTeam });
+  } catch (error) {
+    console.error("❌ Error removing member:", error);
+    res.status(500).json({ message: "Failed to remove member", error: error.message });
+  }
+});
+
+// Delete a team
+app.delete("/api/teams/:teamId", authenticate, async (req, res) => {
+  try {
+    const teamRepo = AppDataSource.getRepository("Team");
+    const team = await teamRepo.findOne({ where: { id: req.params.teamId } });
+    if (!team) return res.status(404).json({ message: "Team not found" });
+    if (team.creatorId !== req.user.id) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+    await teamRepo.remove(team);
+    res.json({ message: "Team deleted successfully" });
+  } catch (error) {
+    console.error("❌ Error deleting team:", error);
+    res.status(500).json({ message: "Failed to delete team", error: error.message });
+  }
+});
+
+// --- Team Invitation Endpoints ---
+
+// 1. Get all pending invitations for the logged-in user
+app.get("/api/teams/invitations", authenticate, async (req, res) => {
+  try {
+    const invitationRepo = AppDataSource.getRepository("Invitation");
+    const teamRepo = AppDataSource.getRepository("Team");
+    const invites = await invitationRepo.find({ where: { inviteeId: req.user.id, status: "pending" } });
+    // Attach team name
+    const teamIds = invites.map(i => i.teamId);
+    const teams = await teamRepo.findByIds(teamIds);
+    const teamMap = {};
+    teams.forEach(t => { teamMap[t.id] = t.name; });
+    const invitations = invites.map(i => ({ ...i, teamName: teamMap[i.teamId] || "" }));
+    res.json({ invitations });
+  } catch (err) {
+    console.error("Error in /api/teams/invitations:", err);
+    res.status(500).json({ message: "Failed to fetch invitations", error: err.message });
+  }
+});
+
+// 2. Send an invitation to a user by email
+app.post("/api/teams/:teamId/invite", authenticate, async (req, res) => {
+  try {
+    const { teamId } = req.params;
+    const { email } = req.body;
+    const teamRepo = AppDataSource.getRepository("Team");
+    const userRepo = AppDataSource.getRepository("User");
+    const invitationRepo = AppDataSource.getRepository("Invitation");
+    const team = await teamRepo.findOne({ where: { id: teamId }, relations: ["members", "creator"] });
+    if (!team) return res.status(404).json({ message: "Team not found" });
+    if (team.creatorId !== req.user.id) return res.status(403).json({ message: "Not authorized" });
+    const invitee = await userRepo.findOne({ where: { email } });
+    if (!invitee) return res.status(404).json({ message: "User not found" });
+    if (team.members.some(m => m.id === invitee.id)) return res.status(400).json({ message: "User is already a member" });
+    const existingInvite = await invitationRepo.findOne({ where: { teamId, inviteeId: invitee.id, status: "pending" } });
+    if (existingInvite) return res.status(400).json({ message: "Invitation already sent" });
+    const invitation = invitationRepo.create({ teamId, inviteeId: invitee.id, status: "pending" });
+    await invitationRepo.save(invitation);
+    res.status(201).json({ message: "Invitation sent", invitation });
+  } catch (err) {
+    console.error("Error in /api/teams/:teamId/invite:", err);
+    res.status(500).json({ message: "Failed to send invitation", error: err.message });
+  }
+});
+
+// 3. Accept an invitation
+app.post("/api/teams/invitations/:inviteId/accept", authenticate, async (req, res) => {
+  try {
+    const { inviteId } = req.params;
+    const invitationRepo = AppDataSource.getRepository("Invitation");
+    const teamRepo = AppDataSource.getRepository("Team");
+    const userRepo = AppDataSource.getRepository("User");
+    const invitation = await invitationRepo.findOne({ where: { id: inviteId } });
+    if (!invitation) return res.status(404).json({ message: "Invitation not found" });
+    if (invitation.inviteeId !== req.user.id) return res.status(403).json({ message: "Not authorized" });
+    invitation.status = "accepted";
+    await invitationRepo.save(invitation);
+    const team = await teamRepo.findOne({ where: { id: invitation.teamId }, relations: ["members"] });
+    const userEntity = await userRepo.findOne({ where: { id: req.user.id } });
+    if (!team.members.some(m => m.id === req.user.id)) {
+      team.members.push(userEntity);
+      await teamRepo.save(team);
+    }
+    res.json({ message: "Invitation accepted" });
+  } catch (err) {
+    console.error("Error in /api/teams/invitations/:inviteId/accept:", err);
+    res.status(500).json({ message: "Failed to accept invitation", error: err.message });
+  }
+});
+
+// 4. Reject an invitation
+app.post("/api/teams/invitations/:inviteId/reject", authenticate, async (req, res) => {
+  try {
+    const { inviteId } = req.params;
+    const invitationRepo = AppDataSource.getRepository("Invitation");
+    const invitation = await invitationRepo.findOne({ where: { id: inviteId } });
+    if (!invitation) return res.status(404).json({ message: "Invitation not found" });
+    if (invitation.inviteeId !== req.user.id) return res.status(403).json({ message: "Not authorized" });
+    invitation.status = "rejected";
+    await invitationRepo.save(invitation);
+    res.json({ message: "Invitation rejected" });
+  } catch (err) {
+    console.error("Error in /api/teams/invitations/:inviteId/reject:", err);
+    res.status(500).json({ message: "Failed to reject invitation", error: err.message });
+  }
+});
+
+// --- Update User Profile ---
+app.put('/users/:id', authenticate, async (req, res) => {
+  try {
+    const userRepo = AppDataSource.getRepository(User);
+    const user = await userRepo.findOne({ where: { id: req.params.id } });
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (user.id !== req.user.id) {
+      return res.status(403).json({ message: 'Not authorized' });
+    }
+    user.name = req.body.name || user.name;
+    user.email = req.body.email || user.email;
+    // Add more fields as needed
+    await userRepo.save(user);
+    res.json({ message: 'Profile updated', user });
+  } catch (error) {
+    console.error('❌ Update user error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// --- Move Document or File to Folder ---
+app.put('/documents/:id/move', authenticate, async (req, res) => {
+  try {
+    const { folder_id } = req.body;
+    const documentRepo = AppDataSource.getRepository(Document);
+    const fileRepo = AppDataSource.getRepository(File);
+    // Try to find as document first
+    let document = await documentRepo.findOne({ where: { id: req.params.id, userId: req.user.id } });
+    if (document) {
+      document.folder_id = folder_id;
+      await documentRepo.save(document);
+      return res.json({ message: 'Document moved', document });
+    }
+    // If not a document, try as file
+    let file = await fileRepo.findOne({ where: { id: req.params.id, user_id: req.user.id } });
+    if (file) {
+      file.folder_id = folder_id;
+      await fileRepo.save(file);
+      return res.json({ message: 'File moved', file });
+    }
+    return res.status(404).json({ message: 'Document or file not found' });
+  } catch (error) {
+    console.error('❌ Move document/file error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// --- Leave Team ---
+app.post('/api/teams/:teamId/leave', authenticate, async (req, res) => {
+  try {
+    const { teamId } = req.params;
+    const teamRepo = AppDataSource.getRepository("Team");
+    const team = await teamRepo.findOne({ where: { id: teamId }, relations: ["members"] });
+    if (!team) return res.status(404).json({ message: 'Team not found' });
+    if (team.creatorId === req.user.id) {
+      return res.status(400).json({ message: 'Creator cannot leave the team' });
+    }
+    team.members = team.members.filter(m => m.id !== req.user.id);
+    await teamRepo.save(team);
+    res.json({ message: 'Left team successfully' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// --- Upload User Avatar ---
+app.post('/users/:id/avatar', authenticate, upload.single('avatar'), async (req, res) => {
+  try {
+    if (req.user.id !== req.params.id) {
+      return res.status(403).json({ message: 'Not authorized' });
+    }
+    if (!req.file) {
+      return res.status(400).json({ message: 'No file uploaded' });
+    }
+    const s3Key = `avatars/${req.user.id}-${Date.now()}-${req.file.originalname.replace(/[^a-zA-Z0-9.]/g, '_')}`;
+    const params = {
+      Bucket: process.env.REACT_APP_AWS_BUCKET_NAME,
+      Key: s3Key,
+      Body: req.file.buffer,
+      ContentType: req.file.mimetype,
+      ACL: 'public-read'
+    };
+    await s3.send(new PutObjectCommand(params));
+    const avatarUrl = `https://${process.env.REACT_APP_AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION || 'ap-southeast-2'}.amazonaws.com/${s3Key}`;
+    const userRepo = AppDataSource.getRepository(User);
+    const user = await userRepo.findOne({ where: { id: req.user.id } });
+    user.avatar_url = avatarUrl;
+    await userRepo.save(user);
+    res.json({ message: 'Avatar uploaded', avatar_url: avatarUrl });
+  } catch (error) {
+    console.error('❌ Avatar upload error:', error);
+    res.status(500).json({ message: 'Avatar upload failed', error: error.message });
+  }
+});
+
+// --- Share File ---
+app.post('/files/:id/share', authenticate, async (req, res) => {
+  try {
+    const { userIds = [], emails = [] } = req.body;
+    const fileRepo = AppDataSource.getRepository(File);
+    const file = await fileRepo.findOne({ where: { id: req.params.id, user_id: req.user.id } });
+    if (!file) return res.status(404).json({ message: 'File not found' });
+    let sharedWith = Array.isArray(file.shared_with) ? file.shared_with : [];
+    sharedWith = [...new Set([...sharedWith, ...userIds, ...emails])];
+    file.shared_with = sharedWith;
+    await fileRepo.save(file);
+    res.json({ message: 'File shared', shared_with: sharedWith });
+  } catch (error) {
+    res.status(500).json({ message: 'Share failed', error: error.message });
+  }
+});
+
+// --- Share Document ---
+app.post('/documents/:id/share', authenticate, async (req, res) => {
+  try {
+    const { userIds = [], emails = [] } = req.body;
+    const documentRepo = AppDataSource.getRepository(Document);
+    const document = await documentRepo.findOne({ where: { id: req.params.id, userId: req.user.id } });
+    if (!document) return res.status(404).json({ message: 'Document not found' });
+    let sharedWith = Array.isArray(document.shared_with) ? document.shared_with : [];
+    sharedWith = [...new Set([...sharedWith, ...userIds, ...emails])];
+    document.shared_with = sharedWith;
+    await documentRepo.save(document);
+    res.json({ message: 'Document shared', shared_with: sharedWith });
+  } catch (error) {
+    res.status(500).json({ message: 'Share failed', error: error.message });
+  }
+});
+
+// --- Get Shared Files/Documents ---
+app.get('/shared', authenticate, async (req, res) => {
+  try {
+    const fileRepo = AppDataSource.getRepository(File);
+    const documentRepo = AppDataSource.getRepository(Document);
+    const userId = req.user.id;
+    const userEmail = req.user.email;
+    const files = await fileRepo.find();
+    const documents = await documentRepo.find();
+    const sharedFiles = files.filter(f => Array.isArray(f.shared_with) && (f.shared_with.includes(userId) || f.shared_with.includes(userEmail)));
+    const sharedDocuments = documents.filter(d => Array.isArray(d.shared_with) && (d.shared_with.includes(userId) || d.shared_with.includes(userEmail)));
+    res.json({ files: sharedFiles, documents: sharedDocuments });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to fetch shared items', error: error.message });
   }
 });

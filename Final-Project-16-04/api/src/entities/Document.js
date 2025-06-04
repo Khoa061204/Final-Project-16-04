@@ -34,6 +34,16 @@ module.exports = new EntitySchema({
     updatedAt: {
       type: "timestamp",
       default: () => "CURRENT_TIMESTAMP"
+    },
+    folder_id: {
+      type: "char",
+      length: 36,
+      nullable: true
+    },
+    shared_with: {
+      type: "simple-json",
+      nullable: true,
+      default: '[]'
     }
   },
   relations: {

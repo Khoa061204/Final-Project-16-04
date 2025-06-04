@@ -7,7 +7,11 @@ import UploadFile from "./Pages/UploadFile";
 import ForgotPassword from "./Pages/ForgotPassword";
 import ResetPassword from "./Pages/ResetPassword";
 import TextEditor from "./Pages/TextEditor";
-import { isAuthenticated, verifyToken, isRememberMeEnabled } from "./utils/auth";
+import Teams from './Pages/Teams';
+import { isAuthenticated, verifyToken, isRememberMeEnabled, getToken, setTokenWithExpiry } from "./utils/auth";
+import Sidebar from './components/Sidebar';
+import MainLayout from "./components/MainLayout";
+import TeamChat from "./components/TeamChat";
 
 // Create Authentication Context
 export const AuthContext = createContext({
@@ -27,6 +31,7 @@ function App() {
     rememberMe: false,
     loading: true
   });
+  const [teams, setTeams] = useState([]);
 
   // Check authentication on app load
   useEffect(() => {
@@ -62,11 +67,63 @@ function App() {
     checkAuth();
   }, []);
 
+  useEffect(() => {
+    const fetchTeams = async () => {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+      const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:5000/api'}/teams`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setTeams(data.teams || []);
+      }
+    };
+    fetchTeams();
+  }, [authState.isAuthenticated]);
+
+  // Token refresh logic
+  useEffect(() => {
+    let interval;
+    async function refreshAuthToken() {
+      try {
+        const token = getToken();
+        if (!token) return;
+        const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/refresh-token`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (data.token) {
+            setTokenWithExpiry(data.token);
+          }
+        }
+      } catch (err) {
+        // Optionally handle refresh error
+      }
+    }
+    if (authState.isAuthenticated) {
+      // Refresh every 25 minutes (token expires in 1h)
+      interval = setInterval(refreshAuthToken, 25 * 60 * 1000);
+    }
+    return () => clearInterval(interval);
+  }, [authState.isAuthenticated]);
+
   // Show loading state while checking authentication
   if (authState.loading) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-violet-500"></div>
+      <div className="flex items-center justify-center h-screen bg-gray-50">
+        <div className="text-center">
+          <div className="loading-spinner mx-auto"></div>
+          <p className="mt-4 text-gray-600 animate-pulse">Loading your workspace...</p>
+        </div>
       </div>
     );
   }
@@ -86,18 +143,96 @@ function App() {
       <Router>
         <Routes>
           {/* Public routes */}
-          <Route path="/login" element={authState.isAuthenticated ? <Navigate to="/" /> : <Login />} />
+          <Route path="/login" element={<Login />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/register" element={<Register />} />
           
           {/* Protected routes */}
-          <Route path="/" element={authState.isAuthenticated ? <Home /> : <Navigate to="/login" />} />
-          <Route path="/home" element={authState.isAuthenticated ? <Home /> : <Navigate to="/login" />} />
-          <Route path="/folders/:folderId" element={authState.isAuthenticated ? <Home /> : <Navigate to="/login" />} />
-          <Route path="/upload" element={authState.isAuthenticated ? <UploadFile /> : <Navigate to="/login" />} />
-          <Route path="/documents/:id" element={authState.isAuthenticated ? <TextEditor /> : <Navigate to="/login" />} />
-          
+          <Route
+            path="/"
+            element={
+              authState.isAuthenticated ? (
+                <MainLayout teams={teams}>
+                  <Home />
+                </MainLayout>
+              ) : (
+                <Navigate to="/login" />
+              )
+            }
+          />
+          <Route
+            path="/home"
+            element={
+              authState.isAuthenticated ? (
+                <MainLayout teams={teams}>
+                  <Home />
+                </MainLayout>
+              ) : (
+                <Navigate to="/login" />
+              )
+            }
+          />
+          <Route
+            path="/folders/:folderId"
+            element={
+              authState.isAuthenticated ? (
+                <MainLayout teams={teams}>
+                  <Home />
+                </MainLayout>
+              ) : (
+                <Navigate to="/login" />
+              )
+            }
+          />
+          <Route
+            path="/upload"
+            element={
+              authState.isAuthenticated ? (
+                <MainLayout teams={teams}>
+                  <UploadFile />
+                </MainLayout>
+              ) : (
+                <Navigate to="/login" />
+              )
+            }
+          />
+          <Route
+            path="/documents/:id"
+            element={
+              authState.isAuthenticated ? (
+                <MainLayout teams={teams}>
+                  <TextEditor />
+                </MainLayout>
+              ) : (
+                <Navigate to="/login" />
+              )
+            }
+          />
+          <Route
+            path="/teams"
+            element={
+              authState.isAuthenticated ? (
+                <MainLayout teams={teams}>
+                  <Teams teams={teams} setTeams={setTeams} />
+                </MainLayout>
+              ) : (
+                <Navigate to="/login" />
+              )
+            }
+          />
+          <Route
+            path="/chat"
+            element={
+              authState.isAuthenticated ? (
+                <MainLayout teams={teams}>
+                  <TeamChat user={authState.user} teams={teams} />
+                </MainLayout>
+              ) : (
+                <Navigate to="/login" />
+              )
+            }
+          />
           {/* Catch-all route */}
           <Route path="*" element={<Navigate to={authState.isAuthenticated ? "/" : "/login"} />} />
         </Routes>

@@ -6,9 +6,8 @@ module.exports = new EntitySchema({
   columns: {
     id: {
       primary: true,
-      type: "varchar",
-      length: 255,
-      name: "id"
+      type: "uuid",
+      generated: "uuid"
     },
     username: {
       type: "varchar",
@@ -24,6 +23,24 @@ module.exports = new EntitySchema({
       type: "varchar",
       length: 255,
       nullable: false
+    },
+    created_at: {
+      type: "timestamp",
+      precision: 6,
+      nullable: false,
+      default: () => "CURRENT_TIMESTAMP(6)"
+    },
+    updated_at: {
+      type: "timestamp",
+      precision: 6,
+      nullable: false,
+      default: () => "CURRENT_TIMESTAMP(6)",
+      onUpdate: "CURRENT_TIMESTAMP(6)"
+    },
+    avatar_url: {
+      type: "varchar",
+      length: 512,
+      nullable: true
     }
-  },
+  }
 });

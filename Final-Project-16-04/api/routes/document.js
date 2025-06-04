@@ -41,7 +41,7 @@ const s3 = new S3Client({
 
 // Create document
 router.post("/", authenticate, async (req, res) => {
-  const { title, content } = req.body;
+  const { title, content, folder_id } = req.body;
   
   try {
     const documentRepo = AppDataSource.getRepository(Document);
@@ -87,7 +87,8 @@ router.post("/", authenticate, async (req, res) => {
       userId: req.user.id,
       s3Key: s3Key,
       createdAt: new Date(),
-      updatedAt: new Date()
+      updatedAt: new Date(),
+      folder_id: folder_id || null
     });
     
     await documentRepo.save(newDocument);
@@ -112,9 +113,16 @@ router.post("/", authenticate, async (req, res) => {
 router.get("/", authenticate, async (req, res) => {
   try {
     const documentRepo = AppDataSource.getRepository(Document);
+    const query = { userId: req.user.id };
+    if (req.query.root === 'true') {
+      query.folder_id = null;
+    } else if (req.query.folder_id) {
+      query.folder_id = req.query.folder_id;
+    }
     const documents = await documentRepo.find({
-      where: { userId: req.user.id },
-      select: ["id", "title", "createdAt", "updatedAt"]
+      where: query,
+      select: ["id", "title", "createdAt", "updatedAt", "folder_id"],
+      order: { createdAt: "DESC" }
     });
     res.status(200).json({ documents });
   } catch (error) {
@@ -127,18 +135,18 @@ router.get("/", authenticate, async (req, res) => {
 router.get("/:id", authenticate, async (req, res) => {
   try {
     const documentRepo = AppDataSource.getRepository(Document);
-    
     const document = await documentRepo.findOne({
-      where: { 
-        id: req.params.id,
-        userId: req.user.id 
-      }
+      where: { id: req.params.id },
+      select: [
+        "id", "title", "content", "s3Key", "userId", "createdAt", "updatedAt", "folder_id", "shared_with"
+      ]
     });
-    
-    if (!document) {
+    if (!document || (
+      document.userId !== req.user.id &&
+      !((document.shared_with || []).includes(req.user.id) || (document.shared_with || []).includes(req.user.email))
+    )) {
       return res.status(404).json({ message: "❌ Document not found" });
     }
-    
     res.json({ document });
   } catch (error) {
     console.error("❌ Get document error:", error);
@@ -154,13 +162,16 @@ router.put("/:id", authenticate, async (req, res) => {
     const documentRepo = AppDataSource.getRepository(Document);
     
     let document = await documentRepo.findOne({
-      where: { 
-        id: req.params.id,
-        userId: req.user.id 
-      }
+      where: { id: req.params.id },
+      select: [
+        "id", "title", "content", "s3Key", "userId", "createdAt", "updatedAt", "folder_id", "shared_with"
+      ]
     });
     
-    if (!document) {
+    if (!document || (
+      document.userId !== req.user.id &&
+      !((document.shared_with || []).includes(req.user.id) || (document.shared_with || []).includes(req.user.email))
+    )) {
       return res.status(404).json({ message: "❌ Document not found" });
     }
     

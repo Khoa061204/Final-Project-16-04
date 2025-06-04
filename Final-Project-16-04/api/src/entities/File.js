@@ -33,6 +33,11 @@ module.exports = new EntitySchema({
       length: 36,
       nullable: true,
     },
+    shared_with: {
+      type: "simple-json",
+      nullable: true,
+      default: '[]'
+    },
   },
   relations: {
     user: {

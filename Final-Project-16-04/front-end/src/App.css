@@ -36,3 +36,31 @@
     transform: rotate(360deg);
   }
 }
+
+/* Collaboration cursor floating label styles */
+.collaboration-cursor__caret {
+  position: relative;
+  z-index: 10;
+}
+
+.collaboration-cursor__label {
+  position: absolute !important;
+  left: 0;
+  top: -1.8em;
+  z-index: 20;
+  pointer-events: none;
+  background: #d16ba5;
+  color: #fff;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+
+/* Optional: make the caret more visible */
+.collaboration-cursor__caret {
+  width: 2px;
+  background: #d16ba5;
+  border-radius: 1px;
+}

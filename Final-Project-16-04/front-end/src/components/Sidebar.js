@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useState, useEffect, useContext } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import { handleLogout } from "../utils/auth";
 import { AuthContext } from "../App";
 import { 
@@ -11,132 +11,170 @@ import {
   MdChat,
   MdSettings, 
   MdLogout, 
-  MdMenu 
+  MdMenu,
+  MdPerson,
+  MdClose
 } from 'react-icons/md';
+import Profile from './Profile';
+import TeamChat from "./TeamChat";
 
-const Sidebar = ({ fixed = false }) => {
+const NavItem = ({ icon: Icon, label, onClick, badge, isActive }) => (
+  <li
+    className={`rounded-lg px-3 py-2.5 flex items-center cursor-pointer transition-all duration-200 ${
+      isActive 
+        ? 'bg-primary text-white' 
+        : 'text-gray-700 hover:bg-gray-100'
+    }`}
+    onClick={onClick}
+  >
+    <Icon className={`text-xl ${isActive ? 'text-white' : 'text-gray-500'}`} />
+    <span className={`ml-3 font-medium ${isActive ? 'text-white' : 'text-gray-700'}`}>{label}</span>
+    {badge > 0 && (
+      <span className="ml-auto bg-red-500 text-white text-xs rounded-full px-2 py-0.5 font-medium">
+        {badge}
+      </span>
+    )}
+  </li>
+);
+
+const Sidebar = ({ onClose, teams = [] }) => {
   const navigate = useNavigate();
-  const { setIsAuthenticated, setUser, setRememberMe } = React.useContext(AuthContext);
-  const [collapsed, setCollapsed] = useState(true);
-  const [visible, setVisible] = useState(window.innerWidth >= 768); // Hide on small screens
+  const location = useLocation();
+  const { setIsAuthenticated, setUser, setRememberMe, user } = useContext(AuthContext);
+  const [showProfile, setShowProfile] = useState(false);
+  const [pendingInvites, setPendingInvites] = useState(0);
 
-  React.useEffect(() => {
-    const handleResize = () => {
-      setVisible(window.innerWidth >= 768);
+  useEffect(() => {
+    const fetchInvites = async () => {
+      if (!user) return;
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:5000/api'}/teams/invitations`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setPendingInvites(data.invitations ? data.invitations.length : 0);
+        }
+      } catch (err) {
+        setPendingInvites(0);
+      }
     };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
-  const toggleSidebar = () => setVisible(v => !v);
+    fetchInvites();
+  }, [user]);
 
   const onLogout = () => {
-    // Clear authentication state
     setIsAuthenticated(false);
     setUser(null);
     setRememberMe(false);
-    
-    // Clear tokens from localStorage
     handleLogout();
-    
-    // Navigate to login page
     navigate('/login', { replace: true });
   };
 
   const navigateTo = (path) => {
     navigate(path);
+    if (onClose) onClose();
   };
 
   return (
-    <>
-      {/* Toggle button for small screens */}
-      {!visible && (
-        <button
-          className="fixed top-4 left-4 z-50 bg-indigo-900 text-white p-2 rounded-md md:hidden"
-          onClick={toggleSidebar}
-          aria-label="Open sidebar"
+    <div className="h-full bg-white border-r border-gray-200 w-64 flex flex-col">
+      {/* Mobile close button */}
+      <button
+        onClick={onClose}
+        className="lg:hidden absolute top-4 right-4 p-2 rounded-md hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary/50"
+      >
+        <MdClose className="h-5 w-5 text-gray-500" />
+      </button>
+
+      {/* Profile section */}
+      <div className="p-4 border-b border-gray-200">
+        <div 
+          className="flex items-center space-x-3 p-2 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors duration-200"
+          onClick={() => setShowProfile(true)}
         >
-          <MdMenu className="text-2xl" />
-        </button>
-      )}
-      {visible && (
-        <div
-          className={`h-screen bg-indigo-900 transition-all duration-300 flex flex-col z-40 ${collapsed ? 'w-16' : 'w-60'}${fixed ? ' fixed left-0 top-0' : ''}`}
-          onMouseEnter={() => setCollapsed(false)}
-          onMouseLeave={() => setCollapsed(true)}
-          style={{ position: fixed ? 'fixed' : 'relative' }}
-        >
-          {/* Top menu icon for mobile/desktop */}
-          <div className="flex items-center justify-center py-4 md:hidden">
-            <MdMenu className="text-white text-2xl" onClick={toggleSidebar} />
+          <div className="w-10 h-10 bg-primary rounded-full flex items-center justify-center overflow-hidden">
+            {user?.avatar_url ? (
+              <img src={user.avatar_url} alt="avatar" className="w-full h-full object-cover" />
+            ) : (
+              <MdPerson className="text-white text-xl" />
+            )}
           </div>
-          <nav className="px-2 flex-1">
-            <ul className="space-y-2">
-              <li
-                className="rounded px-3 py-2 text-white flex items-center cursor-pointer hover:bg-indigo-800"
-                onClick={() => navigateTo('/')}
-              >
-                <MdCloud className="text-2xl mr-0.5" />
-                {!collapsed && <span className="ml-3">My Cloud</span>}
-              </li>
-              <li
-                className="rounded px-3 py-2 text-white flex items-center hover:bg-indigo-800 cursor-pointer"
-                onClick={() => navigateTo('/teams')}
-              >
-                <MdGroup className="text-2xl mr-0.5" />
-                {!collapsed && <span className="ml-3">My Teams</span>}
-              </li>
-              <li
-                className="rounded px-3 py-2 text-white flex items-center hover:bg-indigo-800 cursor-pointer"
-                onClick={() => navigateTo('/teams/new')}
-              >
-                <MdGroupAdd className="text-2xl mr-0.5" />
-                {!collapsed && <span className="ml-3">Add Team</span>}
-              </li>
-              <li
-                className="rounded px-3 py-2 text-white flex items-center hover:bg-indigo-800 cursor-pointer"
-                onClick={() => navigateTo('/calendar')}
-              >
-                <MdCalendarToday className="text-2xl mr-0.5" />
-                {!collapsed && <span className="ml-3">Calendar</span>}
-              </li>
-              <li
-                className="rounded px-3 py-2 text-white flex items-center hover:bg-indigo-800 cursor-pointer"
-                onClick={() => navigateTo('/chat')}
-              >
-                <MdChat className="text-2xl mr-0.5" />
-                {!collapsed && <span className="ml-3">Team Chat</span>}
-              </li>
-              <li
-                className="rounded px-3 py-2 text-white flex items-center hover:bg-indigo-800 cursor-pointer"
-                onClick={() => navigateTo('/notifications')}
-              >
-                <MdNotifications className="text-2xl mr-0.5" />
-                {!collapsed && <span className="ml-3">Notifications</span>}
-              </li>
-            </ul>
-          </nav>
-          <div className="px-2 mb-6 mt-auto">
-            <ul className="space-y-2">
-              <li
-                className="rounded px-3 py-2 text-white flex items-center hover:bg-indigo-800 cursor-pointer"
-                onClick={() => navigateTo('/settings')}
-              >
-                <MdSettings className="text-2xl mr-0.5" />
-                {!collapsed && <span className="ml-3">Settings</span>}
-              </li>
-              <li
-                className="rounded px-3 py-2 text-white flex items-center hover:bg-indigo-800 cursor-pointer"
-                onClick={onLogout}
-              >
-                <MdLogout className="text-2xl mr-0.5" />
-                {!collapsed && <span className="ml-3">Log out</span>}
-              </li>
-            </ul>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-gray-900 truncate">
+              {user?.name || user?.username || 'User'}
+            </p>
+            <p className="text-xs text-gray-500 truncate">
+              {user?.email || 'user@example.com'}
+            </p>
           </div>
         </div>
+      </div>
+
+      {/* Navigation */}
+      <nav className="flex-1 overflow-y-auto py-4 px-3">
+        <ul className="space-y-1">
+          <NavItem
+            icon={MdCloud}
+            label="My Cloud"
+            onClick={() => navigateTo('/')}
+            isActive={location.pathname === '/'}
+          />
+          <NavItem
+            icon={MdGroup}
+            label="My Teams"
+            onClick={() => navigateTo('/teams')}
+            badge={pendingInvites}
+            isActive={location.pathname === '/teams'}
+          />
+          <NavItem
+            icon={MdCalendarToday}
+            label="Calendar"
+            onClick={() => navigateTo('/calendar')}
+            isActive={location.pathname === '/calendar'}
+          />
+          <NavItem
+            icon={MdChat}
+            label="Team Chat"
+            onClick={() => navigateTo('/chat')}
+            isActive={location.pathname === '/chat'}
+          />
+          <NavItem
+            icon={MdNotifications}
+            label="Notifications"
+            onClick={() => navigateTo('/notifications')}
+            isActive={location.pathname === '/notifications'}
+          />
+        </ul>
+      </nav>
+
+      {/* Bottom section */}
+      <div className="p-4 border-t border-gray-200">
+        <ul className="space-y-1">
+          <NavItem
+            icon={MdSettings}
+            label="Settings"
+            onClick={() => navigateTo('/settings')}
+            isActive={location.pathname === '/settings'}
+          />
+          <NavItem
+            icon={MdLogout}
+            label="Log out"
+            onClick={onLogout}
+            isActive={false}
+          />
+        </ul>
+      </div>
+
+      {/* Profile Modal */}
+      {showProfile && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm">
+          <Profile onClose={() => setShowProfile(false)} />
+        </div>
       )}
-    </>
+    </div>
   );
 };
 
