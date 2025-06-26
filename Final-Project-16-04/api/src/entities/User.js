@@ -42,5 +42,12 @@ module.exports = new EntitySchema({
       length: 512,
       nullable: true
     }
+  },
+  relations: {
+    assignedTasks: {
+      type: "one-to-many",
+      target: "Task",
+      inverseSide: "assignedUser"
+    }
   }
 });

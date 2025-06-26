@@ -1,0 +1,27 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+      {
+        "label": "API Terminal",
+        "type": "shell",
+        "command": "cd api && exec bash",
+        "problemMatcher": [],
+        "group": "build"
+      },
+      {
+        "label": "Front-End Terminal",
+        "type": "shell",
+        "command": "cd front-end && exec bash",
+        "problemMatcher": [],
+        "group": "build"
+      },
+      {
+        "label": "WebSocket Terminal",
+        "type": "shell",
+        "command": "cd websocket-server && exec bash",
+        "problemMatcher": [],
+        "group": "build"
+      }
+    ]
+  }
+  

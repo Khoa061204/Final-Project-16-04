@@ -12,6 +12,9 @@ import { isAuthenticated, verifyToken, isRememberMeEnabled, getToken, setTokenWi
 import Sidebar from './components/Sidebar';
 import MainLayout from "./components/MainLayout";
 import TeamChat from "./components/TeamChat";
+import ProjectsPage from "./Pages/ProjectsPage";
+import ProjectDetailPage from "./Pages/ProjectDetailPage";
+import CalendarPage from "./Pages/CalendarPage";
 
 // Create Authentication Context
 export const AuthContext = createContext({
@@ -191,6 +194,42 @@ function App() {
               authState.isAuthenticated ? (
                 <MainLayout teams={teams}>
                   <UploadFile />
+                </MainLayout>
+              ) : (
+                <Navigate to="/login" />
+              )
+            }
+          />
+          <Route
+            path="/projects"
+            element={
+              authState.isAuthenticated ? (
+                <MainLayout teams={teams}>
+                  <ProjectsPage />
+                </MainLayout>
+              ) : (
+                <Navigate to="/login" />
+              )
+            }
+          />
+          <Route
+            path="/projects/:projectId"
+            element={
+              authState.isAuthenticated ? (
+                <MainLayout teams={teams}>
+                  <ProjectDetailPage />
+                </MainLayout>
+              ) : (
+                <Navigate to="/login" />
+              )
+            }
+          />
+          <Route
+            path="/calendar"
+            element={
+              authState.isAuthenticated ? (
+                <MainLayout teams={teams}>
+                  <CalendarPage />
                 </MainLayout>
               ) : (
                 <Navigate to="/login" />

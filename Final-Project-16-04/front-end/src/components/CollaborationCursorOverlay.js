@@ -1,72 +1,104 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 
-// Floating overlay for collaboration cursor labels
+// Helper to convert hex color to rgba with alpha
+const hexToRgba = (hex, alpha) => {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+
+// Floating overlay for collaboration cursor labels and carets
 const CollaborationCursorOverlay = ({ editor, provider }) => {
   const [cursors, setCursors] = useState([]);
+  const overlayRef = useRef(null); // Ref for the overlay div
 
   useEffect(() => {
-    if (!provider || !editor) return;
+    if (!provider || !editor || !overlayRef.current) return;
     const awareness = provider.awareness;
+    const editorDOM = editor.view.dom; // The ProseMirror editor div
+    const overlayDOM = overlayRef.current; // The overlay div
+    const overlayRect = overlayDOM.getBoundingClientRect(); // Get overlay's position relative to viewport
 
     const updateCursors = () => {
       const states = Array.from(awareness.getStates().entries());
       const newCursors = [];
       for (const [clientID, state] of states) {
-        if (!state.user || typeof state.cursor?.anchor !== 'number') continue;
-        // Use anchor as the cursor position
+        // Skip our own cursor, it's handled by the editor itself
+        if (clientID === provider.awareness.clientID) continue;
+
+        if (!state.user || typeof state.cursor?.anchor !== 'number') {
+          continue;
+        }
         const pos = state.cursor.anchor;
-        // Get coordinates in the editor
+
+        // Get coordinates in the editor relative to the viewport
         let coords = null;
         try {
           coords = editor.view.coordsAtPos(pos);
         } catch (e) {
-          continue;
+           console.error('Error getting coordsAtPos:', e);
+           continue;
         }
+
+        // Calculate position relative to the overlay div
+        const left = coords.left - overlayRect.left;
+        const top = coords.top - overlayRect.top;
+
+        // Get line height from editor for caret height
+        const domAtPos = editor.view.domAtPos(pos);
+        const node = domAtPos.node;
+        let lineElement = node.nodeType === Node.TEXT_NODE ? node.parentNode : node;
+        while (lineElement && lineElement.nodeType !== 1) {
+            lineElement = lineElement.parentNode;
+        }
+
+        const lineHeight = lineElement ? parseFloat(getComputedStyle(lineElement).lineHeight) : 24;
+
         newCursors.push({
           clientID,
           name: state.user.name,
           color: state.user.color,
-          left: coords.left - editor.view.dom.getBoundingClientRect().left,
-          top: coords.top - editor.view.dom.getBoundingClientRect().top - 28, // float above caret
+          left: left,
+          top: top,
+          caretHeight: lineHeight,
         });
       }
       setCursors(newCursors);
     };
 
     awareness.on('change', updateCursors);
-    updateCursors();
+    updateCursors(); // Initial call
     return () => {
       awareness.off('change', updateCursors);
     };
-  }, [provider, editor]);
+  }, [provider, editor, overlayRef.current]); // Added overlayRef.current to dependencies
 
   return (
-    <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, pointerEvents: 'none', zIndex: 100 }}>
+    <div ref={overlayRef} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, pointerEvents: 'none', zIndex: 100 }}>
       {cursors.map(cursor => (
         <React.Fragment key={cursor.clientID}>
-          {/* Caret: always 2px wide, 20px tall, never full width */}
-          <span
+          {/* Caret: thin vertical line */}
+          <div
             style={{
               position: 'absolute',
               left: cursor.left,
-              top: cursor.top + 18,
+              top: cursor.top,
               width: 2,
-              height: 20,
+              height: cursor.caretHeight,
               backgroundColor: cursor.color,
-              borderRadius: 1,
               pointerEvents: 'none',
               zIndex: 100,
-              display: 'inline-block',
-              boxShadow: '0 0 2px rgba(0,0,0,0.2)',
             }}
+            className="collaboration-caret-blink"
           />
           {/* Username label above caret */}
-          <span
+          <div
             style={{
               position: 'absolute',
               left: cursor.left + 4,
-              top: cursor.top,
-              background: cursor.color,
+              top: cursor.top - 20,
+              background: hexToRgba(cursor.color, 0.8),
               color: '#fff',
               padding: '2px 6px',
               borderRadius: 4,
@@ -75,11 +107,10 @@ const CollaborationCursorOverlay = ({ editor, provider }) => {
               pointerEvents: 'none',
               zIndex: 101,
               whiteSpace: 'nowrap',
-              boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
             }}
           >
             {cursor.name}
-          </span>
+          </div>
         </React.Fragment>
       ))}
     </div>

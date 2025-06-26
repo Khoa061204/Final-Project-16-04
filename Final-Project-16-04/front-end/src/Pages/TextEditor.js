@@ -3,7 +3,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Collaboration from '@tiptap/extension-collaboration';
-import CollaborationCursor from '@tiptap/extension-collaboration-cursor';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import { useParams, useNavigate, useBeforeUnload } from 'react-router-dom';
@@ -191,17 +190,6 @@ const TextEditor = () => {
         Collaboration.configure({
           document: ydocRef.current,
         }),
-        CollaborationCursor.configure({
-          provider: providerRef.current,
-          user: {
-            name: user?.name || user?.username || user?.email || 'Anonymous',
-            color: '#' + Math.floor(Math.random()*16777215).toString(16),
-          },
-          renderLabel() {
-            // Always return null, label is rendered by React overlay
-            return null;
-          }
-        }),
         Highlight,
         TextAlign.configure({
           types: ['heading', 'paragraph'],
@@ -226,6 +214,38 @@ const TextEditor = () => {
       }
     };
   }, [status, document?.content, user]);
+
+  // *** New useEffect for custom cursor tracking ***
+  useEffect(() => {
+    if (!editor || !providerRef.current) return;
+
+    const awareness = providerRef.current.awareness;
+    // Get the current user's client ID from the awareness object
+    const userId = awareness.clientID;
+
+    const handleSelectionUpdate = () => {
+      const cursorPosition = editor.state.selection.anchor;
+
+      // Update the awareness state with the current user's cursor position
+      // We only set the cursor for the local user's client ID in the awareness state
+      awareness.setLocalStateField('cursor', {
+        anchor: cursorPosition,
+        // Optionally, include head and other selection properties if needed
+        // head: editor.state.selection.head,
+        // type: editor.state.selection.type,
+      });
+    };
+
+    editor.on('selectionUpdate', handleSelectionUpdate);
+
+    // Clean up the event listener when the effect dependencies change or component unmounts
+    return () => {
+      editor.off('selectionUpdate', handleSelectionUpdate);
+      // Clear the cursor state when the user disconnects or leaves
+      awareness.setLocalStateField('cursor', null);
+    };
+  }, [editor, providerRef.current]);
+  // *** End of new useEffect ***
 
   // Save document content
   const saveDocument = async () => {
@@ -318,14 +338,28 @@ const TextEditor = () => {
       `document-${id}`,
       ydocRef.current
     );
-    providerRef.current.on('status', event => {
+
+    const provider = providerRef.current;
+    const awareness = provider.awareness;
+
+    // Set the local user's state in awareness
+    const userColor = user?.color || '#' + Math.floor(Math.random()*16777215).toString(16);
+    awareness.setLocalStateField('user', {
+      name: user?.name || user?.username || user?.email || 'Anonymous',
+      color: userColor,
+    });
+
+    provider.on('status', event => {
       setStatus(event.status); // "connected" or "disconnected"
     });
+
     return () => {
-      providerRef.current?.destroy();
+      // Before destroying, set the local state to null to signal disconnect
+      awareness.setLocalState(null);
+      provider?.destroy();
       ydocRef.current?.destroy();
     };
-  }, [id]);
+  }, [id, user]); // Added user to dependency array
 
   if (!editor) {
     return (

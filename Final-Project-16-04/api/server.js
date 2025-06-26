@@ -39,8 +39,9 @@ const Invitation = new EntitySchema({
     createdAt: { type: "datetime", createDate: true }
   }
 });
-const { In } = require("typeorm");
+const { In, Not, IsNull } = require("typeorm");
 const Message = require("./src/entities/Message.js");
+const Project = require("./src/entities/Project.js");
 
 const app = express();
 app.use(express.json({ limit: '20mb' }));
@@ -1032,6 +1033,21 @@ app.post("/api/teams/:teamId/members", authenticate, async (req, res) => {
     res.status(500).json({ message: "Failed to add member", error: error.message });
   }
 });
+// Get all members of a team
+app.get("/api/teams/:teamId/members", authenticate, async (req, res) => {
+  try {
+    const teamRepo = AppDataSource.getRepository("Team");
+    const team = await teamRepo.findOne({
+      where: { id: req.params.teamId },
+      relations: ["members"]
+    });
+    if (!team) return res.status(404).json({ message: "Team not found" });
+    res.json({ members: team.members });
+  } catch (error) {
+    console.error("❌ Error fetching team members:", error);
+    res.status(500).json({ message: "Failed to fetch team members", error: error.message });
+  }
+});
 
 // Remove a member from a team
 app.delete("/api/teams/:teamId/members/:memberId", authenticate, async (req, res) => {
@@ -1305,3 +1321,335 @@ app.get('/shared', authenticate, async (req, res) => {
     res.status(500).json({ message: 'Failed to fetch shared items', error: error.message });
   }
 });
+
+/* ===============================
+        🟢 PROJECT ROUTES
+================================ */
+
+// Helper function to validate project ID
+function isValidProjectId(id) {
+  return typeof id === 'number' || /^[a-zA-Z0-9-]+$/.test(String(id));
+}
+
+// Debug test endpoint
+app.get("/test-log", (req, res) => {
+  console.log("Test endpoint hit!");
+  res.json({ message: "Test OK" });
+});
+
+// Get all projects for the authenticated user
+app.get("/api/projects", authenticate, async (req, res) => {
+  try {
+    console.log("🔵 /api/projects called by user:", req.user && req.user.id);
+    console.log("Getting repository");
+    const projectRepo = AppDataSource.getRepository('Project');
+    console.log("Repository acquired");
+    // Fetch all projects with relations
+    const projects = await projectRepo.find({
+      relations: ['team', 'tasks']
+    });
+    console.log("Projects fetched:", projects.length);
+    // Optionally filter by team membership here if needed
+    res.json(projects);
+  } catch (error) {
+    console.error("❌ Error in /api/projects:", error);
+    res.status(500).json({ message: 'Failed to fetch projects', error: error.message });
+  }
+});
+
+
+// Get a specific project by ID
+app.get("/api/projects/:id", authenticate, async (req, res) => {
+  try {
+    const projectRepo = AppDataSource.getRepository('Project');
+    const project = await projectRepo.findOne({
+      where: { id: req.params.id },
+      relations: ['team', 'tasks', 'team.members']
+    });
+    if (!project || !isValidProjectId(project.id)) {
+      return res.status(404).json({ message: 'Project not found' });
+    }
+    res.json(project);
+  } catch (error) {
+    console.error("❌ Error in /api/projects/:id:", error);
+    res.status(500).json({ message: 'Failed to fetch project', error: error.message });
+  }
+});
+
+// Create a new project
+app.post("/api/projects", authenticate, async (req, res) => {
+  try {
+    const { name, description, teamId, dueDate } = req.body;
+    const projectRepo = AppDataSource.getRepository("Project");
+    const teamRepo = AppDataSource.getRepository("Team");
+    const team = await teamRepo.findOne({ where: { id: teamId }, relations: ["members"] });
+    if (!team) return res.status(404).json({ message: "Team not found" });
+    if (!team.members.some(member => member.id === req.user.id)) {
+      return res.status(403).json({ message: "You are not a member of this team." });
+    }
+    const newProject = projectRepo.create({
+      name,
+      description,
+      team: team,
+      dueDate: dueDate || null,
+    });
+    await projectRepo.save(newProject);
+    res.status(201).json(newProject);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to create project", error: error.message });
+  }
+});
+
+// Update a project
+app.put("/api/projects/:id", authenticate, async (req, res) => {
+  try {
+    const { name, description, dueDate } = req.body;
+    const projectRepo = AppDataSource.getRepository("Project");
+    const project = await projectRepo
+      .createQueryBuilder("project")
+      .leftJoinAndSelect("project.team", "team")
+      .leftJoinAndSelect("team.members", "member")
+      .where("project.id = :projectId", { projectId: req.params.id })
+      .andWhere("member.id = :userId", { userId: req.user.id })
+      .getOne();
+    if (!project) return res.status(404).json({ message: "Project not found" });
+    project.name = name || project.name;
+    project.description = description || project.description;
+    project.dueDate = dueDate ? new Date(dueDate) : project.dueDate;
+    project.updatedAt = new Date();
+    await projectRepo.save(project);
+    res.json(project);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to update project", error: error.message });
+  }
+});
+
+// Delete a project
+app.delete("/api/projects/:id", authenticate, async (req, res) => {
+  try {
+    const projectRepo = AppDataSource.getRepository("Project");
+    const project = await projectRepo
+      .createQueryBuilder("project")
+      .leftJoinAndSelect("project.team", "team")
+      .leftJoinAndSelect("team.members", "member")
+      .where("project.id = :projectId", { projectId: req.params.id })
+      .andWhere("member.id = :userId", { userId: req.user.id })
+      .getOne();
+    if (!project) return res.status(404).json({ message: "Project not found" });
+    await projectRepo.remove(project);
+    res.json({ message: "Project deleted successfully" });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to delete project", error: error.message });
+  }
+});
+
+/* ===============================
+        🟡 TASK ROUTES
+================================ */
+
+// Get all tasks for a project
+app.get("/api/projects/:projectId/tasks", authenticate, async (req, res) => {
+  try {
+    const taskRepo = AppDataSource.getRepository("Task");
+    const projectRepo = AppDataSource.getRepository("Project");
+    
+    // First verify the user has access to the project
+    const project = await projectRepo
+      .createQueryBuilder("project")
+      .leftJoinAndSelect("project.team", "team")
+      .leftJoinAndSelect("team.members", "member")
+      .where("project.id = :projectId", { projectId: req.params.projectId })
+      .andWhere("member.id = :userId", { userId: req.user.id })
+      .getOne();
+
+    if (!project) {
+      return res.status(404).json({ message: "Project not found" });
+    }
+
+    const tasks = await taskRepo.find({
+      where: { projectId: req.params.projectId },
+      relations: ["assignedUser"],
+      order: { createdAt: "DESC" }
+    });
+
+    res.json(tasks);
+  } catch (error) {
+    console.error("❌ Error fetching tasks:", error);
+    res.status(500).json({ message: "Failed to fetch tasks", error: error.message });
+  }
+});
+
+// Create a new task
+app.post("/api/projects/:projectId/tasks", authenticate, async (req, res) => {
+  try {
+    const { title, description, assignedUserId, priority, dueDate } = req.body;
+    const taskRepo = AppDataSource.getRepository("Task");
+    const projectRepo = AppDataSource.getRepository("Project");
+    
+    // First verify the user has access to the project
+    const project = await projectRepo
+      .createQueryBuilder("project")
+      .leftJoinAndSelect("project.team", "team")
+      .leftJoinAndSelect("team.members", "member")
+      .where("project.id = :projectId", { projectId: req.params.projectId })
+      .andWhere("member.id = :userId", { userId: req.user.id })
+      .getOne();
+
+    if (!project) {
+      return res.status(404).json({ message: "Project not found" });
+    }
+
+    const newTask = taskRepo.create({
+      title,
+      description,
+      projectId: req.params.projectId,
+      assignedUserId: assignedUserId || null,
+      priority: priority || null,
+      dueDate: dueDate ? new Date(dueDate) : null,
+      status: "To Do"
+    });
+
+    await taskRepo.save(newTask);
+
+    // Fetch the task with assigned user
+    const savedTask = await taskRepo.findOne({
+      where: { id: newTask.id },
+      relations: ["assignedUser"]
+    });
+
+    res.status(201).json(savedTask);
+  } catch (error) {
+    console.error("❌ Error creating task:", error);
+    res.status(500).json({ message: "Failed to create task", error: error.message });
+  }
+});
+
+// Update a task (allow admin/lead to assign and set status to In Progress)
+app.put("/api/tasks/:id", authenticate, async (req, res) => {
+  try {
+    const { title, description, assignedUserId, status, priority, dueDate } = req.body;
+    const taskRepo = AppDataSource.getRepository("Task");
+    const projectRepo = AppDataSource.getRepository("Project");
+    const userRepo = AppDataSource.getRepository("User");
+    // First get the task and verify user has access to the project
+    const task = await taskRepo.findOne({
+      where: { id: req.params.id },
+      relations: ["project", "project.team", "project.team.members"]
+    });
+    if (!task) {
+      return res.status(404).json({ message: "Task not found" });
+    }
+    // Check if user has access to the project
+    const hasAccess = task.project.team.members.some(member => member.id === req.user.id);
+    if (!hasAccess) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+    // If assignedUserId is provided and different, allow only admin/lead (implement your own admin check if needed)
+    if (assignedUserId && assignedUserId !== task.assignedUserId) {
+      // TODO: Add admin/lead check here if you have roles
+      task.assignedUserId = assignedUserId;
+      // If status is not provided, set to In Progress
+      if (!status) task.status = "In Progress";
+    }
+    task.title = title || task.title;
+    task.description = description || task.description;
+    task.status = status || task.status;
+    task.priority = priority || task.priority;
+    task.dueDate = dueDate ? new Date(dueDate) : task.dueDate;
+    task.updatedAt = new Date();
+    await taskRepo.save(task);
+    // Fetch the updated task with assigned user
+    const updatedTask = await taskRepo.findOne({
+      where: { id: task.id },
+      relations: ["assignedUser"]
+    });
+    res.json(updatedTask);
+  } catch (error) {
+    console.error("❌ Error updating task:", error);
+    res.status(500).json({ message: "Failed to update task", error: error.message });
+  }
+});
+
+// Delete a task
+app.delete("/api/tasks/:id", authenticate, async (req, res) => {
+  try {
+    const taskRepo = AppDataSource.getRepository("Task");
+    const projectRepo = AppDataSource.getRepository("Project");
+    
+    // First get the task and verify user has access to the project
+    const task = await taskRepo.findOne({
+      where: { id: req.params.id },
+      relations: ["project", "project.team", "project.team.members"]
+    });
+
+    if (!task) {
+      return res.status(404).json({ message: "Task not found" });
+    }
+
+    // Check if user has access to the project
+    const hasAccess = task.project.team.members.some(member => member.id === req.user.id);
+    if (!hasAccess) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    await taskRepo.remove(task);
+    res.json({ message: "Task deleted successfully" });
+  } catch (error) {
+    console.error("❌ Error deleting task:", error);
+    res.status(500).json({ message: "Failed to delete task", error: error.message });
+  }
+});
+
+// Claim a task (move from To Do to In Progress and assign to current user)
+app.patch("/api/tasks/:id/claim", authenticate, async (req, res) => {
+  try {
+    const taskRepo = AppDataSource.getRepository("Task");
+    const task = await taskRepo.findOne({ where: { id: req.params.id }, relations: ["project", "project.team", "project.team.members"] });
+    if (!task) return res.status(404).json({ message: "Task not found" });
+    // Only allow claiming if unassigned and To Do
+    if (task.status !== "To Do" || task.assignedUserId) {
+      return res.status(400).json({ message: "Task is not available to claim" });
+    }
+    // Check user is in the project team
+    const isTeamMember = task.project.team.members.some(member => member.id === req.user.id);
+    if (!isTeamMember) return res.status(403).json({ message: "Not authorized" });
+    task.status = "In Progress";
+    task.assignedUserId = req.user.id;
+    await taskRepo.save(task);
+    res.json(task);
+  } catch (error) {
+    console.error("❌ Error claiming task:", error);
+    res.status(500).json({ message: "Failed to claim task", error: error.message });
+  }
+});
+
+// Complete a task (move from In Progress to Done, log who completed and when)
+app.patch("/api/tasks/:id/complete", authenticate, async (req, res) => {
+  try {
+    const taskRepo = AppDataSource.getRepository("Task");
+    const task = await taskRepo.findOne({ where: { id: req.params.id }, relations: ["project", "project.team", "project.team.members"] });
+    if (!task) return res.status(404).json({ message: "Task not found" });
+    // Only allow assigned user to complete
+    if (task.assignedUserId !== req.user.id) {
+      return res.status(403).json({ message: "Only the assigned user can complete this task" });
+    }
+    if (task.status !== "In Progress") {
+      return res.status(400).json({ message: "Task is not in progress" });
+    }
+    task.status = "Done";
+    task.completedByUserId = req.user.id;
+    task.completedAt = new Date();
+    await taskRepo.save(task);
+    res.json(task);
+  } catch (error) {
+    console.error("❌ Error completing task:", error);
+    res.status(500).json({ message: "Failed to complete task", error: error.message });
+  }
+});
+
+// Add a global error handler at the end of the file
+app.use((err, req, res, next) => {
+  console.error("❌ Uncaught error:", err);
+  res.status(500).json({ message: "Internal server error", error: err.message });
+});
+    

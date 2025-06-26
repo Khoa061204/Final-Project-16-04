@@ -13,7 +13,8 @@ import {
   MdLogout, 
   MdMenu,
   MdPerson,
-  MdClose
+  MdClose,
+  MdCheck
 } from 'react-icons/md';
 import Profile from './Profile';
 import TeamChat from "./TeamChat";
@@ -121,6 +122,12 @@ const Sidebar = ({ onClose, teams = [] }) => {
             label="My Cloud"
             onClick={() => navigateTo('/')}
             isActive={location.pathname === '/'}
+          />
+          <NavItem
+            icon={MdGroup}
+            label="My Projects"
+            onClick={() => navigateTo('/projects')}
+            isActive={location.pathname === '/projects'}
           />
           <NavItem
             icon={MdGroup}
