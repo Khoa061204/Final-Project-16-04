@@ -11,6 +11,7 @@ const Message = require("./src/entities/Message");
 const Project = require("./src/entities/Project");
 const Task = require("./src/entities/Task");
 const Event = require("./src/entities/Event");
+const Share = require("./src/entities/Share");
 
 const AppDataSource = new DataSource({
   type: "mysql",
@@ -19,8 +20,8 @@ const AppDataSource = new DataSource({
   username: process.env.DB_USER || "root",
   password: process.env.DB_PASS || "",
   database: process.env.DB_NAME || "test_db",
-  synchronize: false, // Disable auto-sync since we have existing data
-  entities: [User, Document, File, Folder, Team, Invitation, Message, Project, Task, Event],
+  synchronize: false, // Disable auto-sync to prevent conflicts
+  entities: [User, Document, File, Folder, Team, Invitation, Message, Project, Task, Event, Share],
   driver: require("mysql2"),
   extra: {
     connectionLimit: 10,

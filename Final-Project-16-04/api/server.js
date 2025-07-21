@@ -1,4 +1,3 @@
-// Load environment variables first
 require("dotenv").config();
 
 // Immediate check of environment variables
@@ -15,7 +14,7 @@ const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const multer = require("multer");
-const { S3Client, PutObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
+const { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
 const http = require("http"); // Added for Socket.IO
 const socketIo = require("socket.io"); // Added for Socket.IO
 const AppDataSource = require("./data-source");
@@ -39,9 +38,31 @@ const Invitation = new EntitySchema({
     createdAt: { type: "datetime", createDate: true }
   }
 });
+const Notification = new EntitySchema({
+  name: "Notification",
+  tableName: "notifications",
+  columns: {
+    id: { primary: true, type: "varchar", length: 255, generated: "uuid" },
+    userId: { type: "varchar", length: 255 },
+    type: { type: "varchar", length: 50 }, // 'deadline', 'invitation', 'file_share', 'task_assigned'
+    title: { type: "varchar", length: 255 },
+    message: { type: "text" },
+    data: { type: "json", nullable: true }, // Additional data like projectId, taskId, etc.
+    isRead: { type: "boolean", default: false },
+    createdAt: { type: "datetime", createDate: true }
+  }
+});
 const { In, Not, IsNull } = require("typeorm");
 const Message = require("./src/entities/Message.js");
 const Project = require("./src/entities/Project.js");
+const Event = require("./src/entities/Event.js");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+const AdmZip = require('adm-zip');
+const Unrar = require('node-unrar-js');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const sharingSystem = require('./sharing-system');
 
 const app = express();
 app.use(express.json({ limit: '20mb' }));
@@ -69,7 +90,17 @@ const io = socketIo(server, {
 
 // ✅ Ensure Database Connection
 AppDataSource.initialize()
-  .then(() => console.log("✅ TypeORM Database Connected"))
+  .then(async () => {
+    console.log("✅ TypeORM Database Connected");
+    try {
+      // Try to synchronize but don't fail if there are conflicts
+      await AppDataSource.synchronize();
+      console.log("✅ Database synchronized successfully");
+    } catch (syncError) {
+      console.log("⚠️ Database sync warning (this is normal if tables already exist):", syncError.message);
+      // Continue anyway - the tables might already exist
+    }
+  })
   .catch((err) => console.error("❌ TypeORM Connection Error:", err));
 
 // ✅ AWS S3 Configuration
@@ -364,13 +395,33 @@ app.post("/reset-password", async (req, res) => {
 
 // Allowed MIME types for text/code files
 const allowedMimeTypes = [
+  // Text/code
   "text/plain", "application/json", "application/xml", "text/markdown",
   "text/x-python", "text/x-java-source", "text/x-c", "text/x-c++", "text/html",
   "text/css", "application/javascript", "text/javascript", "application/x-sh",
   "application/x-bat", "application/x-php", "application/x-ruby", "text/x-go",
   "text/x-rustsrc", "text/x-swift", "text/x-kotlin", "text/x-dart", "application/sql",
-  "application/x-yaml", "text/yaml", "text/csv", "application/vnd.ms-excel"
+  "application/x-yaml", "text/yaml", "text/csv", "application/vnd.ms-excel",
+  // PDF
+  "application/pdf",
+  // Images
+  "image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml",
+  // Audio
+  "audio/mpeg", "audio/mp3", "audio/wav", "audio/ogg",
+  // Video
+  "video/mp4", "video/webm", "video/ogg", "video/x-matroska"
 ];
+
+// Utility to get a unique file name in a folder (like Windows)
+async function getUniqueFileName(fileRepo, userId, folderId, baseName, ext) {
+  let name = baseName + ext;
+  let counter = 1;
+  while (await fileRepo.findOne({ where: { user_id: userId, folder_id: folderId, file_name: name } })) {
+    name = `${baseName} (${counter})${ext}`;
+    counter++;
+  }
+  return name;
+}
 
 // ✅ File Upload API (Direct to S3)
 app.post("/upload", authenticate, upload.single("file"), async (req, res) => {
@@ -380,8 +431,8 @@ app.post("/upload", authenticate, upload.single("file"), async (req, res) => {
     }
 
     // Validate file type
-    if (!allowedMimeTypes.includes(req.file.mimetype)) {
-      return res.status(400).json({ message: "❌ Only text/code files are allowed" });
+    if (!allowedMimeTypes.includes(req.file.mimetype) && !['.zip','.rar'].includes(path.extname(req.file.originalname).toLowerCase())) {
+      return res.status(400).json({ message: "❌ Only allowed file types are permitted" });
     }
 
     // Validate AWS configuration
@@ -390,11 +441,9 @@ app.post("/upload", authenticate, upload.single("file"), async (req, res) => {
       return res.status(500).json({ message: "Server configuration error: REACT_APP_AWS_BUCKET_NAME is missing" });
     }
 
-    // Generate S3 key with folder structure
-    const folder_id = req.body.folder_id;
-    const s3Key = folder_id 
-      ? `files/${req.user.id}/${folder_id}/${Date.now()}-${req.file.originalname}`
-      : `files/${req.user.id}/${Date.now()}-${req.file.originalname}`;
+    // Use the uploaded file's original name in the 'files/<user_id>/' folder as the S3 key
+    const safeFileName = req.file.originalname.replace(/\s+/g, '_');
+    const s3Key = `files/${req.user.id}/${safeFileName}`;
 
     console.log(`📤 Attempting to upload file: ${s3Key}`);
     console.log(`🪣 Using bucket: ${process.env.REACT_APP_AWS_BUCKET_NAME}`);
@@ -426,20 +475,60 @@ app.post("/upload", authenticate, upload.single("file"), async (req, res) => {
 
     // Save file metadata to DB
     const fileRepo = AppDataSource.getRepository(File);
+    // Ensure unique file name in the target folder (root)
+    const extUpload = path.extname(req.file.originalname);
+    const baseNameUpload = path.basename(req.file.originalname, extUpload);
+    const uniqueNameUpload = await getUniqueFileName(fileRepo, req.user.id, null, baseNameUpload, extUpload);
     const newFile = fileRepo.create({
       user_id: req.user.id,
-      file_name: req.file.originalname,
+      file_name: uniqueNameUpload,
       file_url: fileUrl,
       s3Key: s3Key,
-      folder_id: folder_id || null,
+      folder_id: null, // No folder for root uploads
       uploaded_at: new Date()
     });
     await fileRepo.save(newFile);
 
+    // --- ZIP/RAR Extraction Logic ---
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    if (ext === '.zip' || ext === '.rar') {
+      // Write buffer to a temp file
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'upload-'));
+      const tempFilePath = path.join(tempDir, safeFileName);
+      fs.writeFileSync(tempFilePath, req.file.buffer);
+      let extractedFiles = [];
+      try {
+        if (ext === '.zip') {
+          const zip = new AdmZip(tempFilePath);
+          zip.extractAllTo(tempDir, true);
+          extractedFiles = zip.getEntries().map(e => e.entryName);
+        } else if (ext === '.rar') {
+          const data = fs.readFileSync(tempFilePath);
+          const extractor = Unrar.createExtractorFromData(data);
+          const extracted = extractor.extractAll();
+          extracted.files.forEach(file => {
+            if (file.extraction && file.fileHeader.name) {
+              const outPath = path.join(tempDir, file.fileHeader.name);
+              fs.mkdirSync(path.dirname(outPath), { recursive: true });
+              fs.writeFileSync(outPath, file.extraction);
+              extractedFiles.push(file.fileHeader.name);
+            }
+          });
+        }
+        console.log(`Extracted files from ${ext}:`, extractedFiles);
+      } catch (extractErr) {
+        console.error(`Error extracting ${ext} file:`, extractErr);
+      }
+      // Clean up temp file (optional, you may want to keep for debugging)
+      // fs.unlinkSync(tempFilePath);
+      // fs.rmdirSync(tempDir, { recursive: true });
+    }
+    // --- END ZIP/RAR Extraction Logic ---
+
     console.log(`✅ File metadata saved to DB:`, {
       name: newFile.file_name,
       url: fileUrl,
-      folder: folder_id || 'root'
+      folder: 'root'
     });
 
     res.status(200).json({ 
@@ -481,8 +570,20 @@ app.get("/files", authenticate, async (req, res) => {
       order: { uploaded_at: "DESC" }
     });
 
-    console.log(`Found ${files.length} files for query:`, query);
-    res.json({ files });
+    // Get shared files if this is a root query
+    let sharedFiles = [];
+    if (req.query.root === 'true') {
+      const sharedItems = sharingSystem.getSharedItems(req.user.id, req.user.email);
+      if (sharedItems.files.length > 0) {
+        sharedFiles = await fileRepo.createQueryBuilder('file')
+          .where('file.id IN (:...ids)', { ids: sharedItems.files })
+          .andWhere('file.folder_id IS NULL') // Only root shared files
+          .getMany();
+      }
+    }
+
+    console.log(`Found ${files.length} owned files and ${sharedFiles.length} shared files for query:`, query);
+    res.json({ files: [...files, ...sharedFiles] });
   } catch (error) {
     console.error("Get files error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
@@ -516,8 +617,21 @@ app.get("/documents", authenticate, async (req, res) => {
       where: query,
       order: { createdAt: "DESC" }
     });
-    console.log(`Found ${documents.length} documents for query:`, query);
-    res.json({ documents });
+    
+    // Get shared documents if this is a root query
+    let sharedDocuments = [];
+    if (req.query.root === 'true') {
+      const sharedItems = sharingSystem.getSharedItems(req.user.id, req.user.email);
+      if (sharedItems.documents.length > 0) {
+        sharedDocuments = await documentRepo.createQueryBuilder('document')
+          .where('document.id IN (:...ids)', { ids: sharedItems.documents })
+          .andWhere('document.folder_id IS NULL') // Only root shared documents
+          .getMany();
+      }
+    }
+    
+    console.log(`Found ${documents.length} owned documents and ${sharedDocuments.length} shared documents for query:`, query);
+    res.json({ documents: [...documents, ...sharedDocuments] });
   } catch (error) {
     console.error("Get documents error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
@@ -530,7 +644,7 @@ app.get("/folders", authenticate, async (req, res) => {
     const folderRepo = AppDataSource.getRepository(Folder);
     const fileRepo = AppDataSource.getRepository(File);
     const documentRepo = AppDataSource.getRepository(Document);
-    const query = { user_id: req.user.id };
+    const query = {};
     
     // Add parent_id filter if provided
     if (req.query.parent_id) {
@@ -723,6 +837,12 @@ io.on('connection', socket => {
       // Optionally handle error
     }
   });
+
+  // Join user-specific room for notifications
+  socket.on('join-user-room', (userId) => {
+    socket.join(`user-${userId}`);
+    console.log(`User ${userId} joined notification room`);
+  });
 });
 
 // Helper function for leaving a document
@@ -758,15 +878,14 @@ app.post("/folders", authenticate, async (req, res) => {
 
     const folderRepo = AppDataSource.getRepository(Folder);
     
-    // If parent_id is provided, verify it exists and belongs to the user
+    // If parent_id is provided, verify it exists
     let parentFolder = null;
     let folderPath = '';
     
     if (parent_id) {
       parentFolder = await folderRepo.findOne({
         where: { 
-          id: parent_id,
-          user_id: req.user.id 
+          id: parent_id
         }
       });
       
@@ -780,7 +899,6 @@ app.post("/folders", authenticate, async (req, res) => {
     }
 
     const newFolder = folderRepo.create({
-      user_id: req.user.id,
       name: name.trim(),
       parent_id: parent_id || null,
       path: folderPath
@@ -888,7 +1006,7 @@ app.delete("/files/:id", authenticate, async (req, res) => {
 app.delete("/folders/:id", authenticate, async (req, res) => {
   try {
     const folderRepo = AppDataSource.getRepository(Folder);
-    const folder = await folderRepo.findOne({ where: { id: req.params.id, user_id: req.user.id } });
+    const folder = await folderRepo.findOne({ where: { id: req.params.id } });
     if (!folder) return res.status(404).json({ message: "Folder not found" });
     await folderRepo.remove(folder);
     res.json({ message: "Folder deleted" });
@@ -980,7 +1098,12 @@ app.get("/api/teams", authenticate, async (req, res) => {
       creatorId: team.creatorId,
       creator: team.creator,
       createdAt: team.createdAt,
-      members: team.members.map(m => ({ id: m.id, name: m.username || m.name, email: m.email }))
+      members: team.members.map(m => ({ 
+        id: m.id, 
+        name: m.username || m.name, 
+        email: m.email,
+        avatar_url: m.avatar_url
+      }))
     }));
     console.log('Teams for user', userId, JSON.stringify(formattedTeams, null, 2));
     res.json({ teams: formattedTeams });
@@ -1127,6 +1250,16 @@ app.post("/api/teams/:teamId/invite", authenticate, async (req, res) => {
     if (existingInvite) return res.status(400).json({ message: "Invitation already sent" });
     const invitation = invitationRepo.create({ teamId, inviteeId: invitee.id, status: "pending" });
     await invitationRepo.save(invitation);
+    
+    // Create notification for invitee
+    await createNotification(
+      invitee.id,
+      'invitation',
+      'Team Invitation',
+      `You've been invited to join team "${team.name}"`,
+      { teamId, teamName: team.name, invitationId: invitation.id }
+    );
+    
     res.status(201).json({ message: "Invitation sent", invitation });
   } catch (err) {
     console.error("Error in /api/teams/:teamId/invite:", err);
@@ -1244,29 +1377,67 @@ app.post('/api/teams/:teamId/leave', authenticate, async (req, res) => {
 // --- Upload User Avatar ---
 app.post('/users/:id/avatar', authenticate, upload.single('avatar'), async (req, res) => {
   try {
-    if (req.user.id !== req.params.id) {
+    console.log('Avatar upload request:', {
+      userId: req.user.id,
+      paramId: req.params.id,
+      userType: typeof req.user.id,
+      paramType: typeof req.params.id
+    });
+    
+    // Convert both to strings for comparison
+    if (String(req.user.id) !== String(req.params.id)) {
+      console.log('Authorization failed:', {
+        userId: req.user.id,
+        paramId: req.params.id
+      });
       return res.status(403).json({ message: 'Not authorized' });
     }
+    
     if (!req.file) {
+      console.log('No file uploaded');
       return res.status(400).json({ message: 'No file uploaded' });
     }
-    const s3Key = `avatars/${req.user.id}-${Date.now()}-${req.file.originalname.replace(/[^a-zA-Z0-9.]/g, '_')}`;
-    const params = {
-      Bucket: process.env.REACT_APP_AWS_BUCKET_NAME,
-      Key: s3Key,
-      Body: req.file.buffer,
-      ContentType: req.file.mimetype,
-      ACL: 'public-read'
-    };
-    await s3.send(new PutObjectCommand(params));
-    const avatarUrl = `https://${process.env.REACT_APP_AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION || 'ap-southeast-2'}.amazonaws.com/${s3Key}`;
+    
+    console.log('File received:', req.file.originalname, 'Size:', req.file.size);
+    
+    // Check file size (max 5MB)
+    if (req.file.size > 5 * 1024 * 1024) {
+      console.log('File too large:', req.file.size);
+      return res.status(400).json({ message: 'File too large. Maximum size is 5MB.' });
+    }
+    
+    // Check file type
+    if (!req.file.mimetype.startsWith('image/')) {
+      console.log('Invalid file type:', req.file.mimetype);
+      return res.status(400).json({ message: 'Only image files are allowed.' });
+    }
+    
+    console.log('Converting to base64...');
+    // Convert to base64
+    const base64Image = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+    
+    console.log('Base64 conversion complete, size:', base64Image.length);
+    
+    console.log('Finding user in database...');
     const userRepo = AppDataSource.getRepository(User);
     const user = await userRepo.findOne({ where: { id: req.user.id } });
-    user.avatar_url = avatarUrl;
+    
+    if (!user) {
+      console.log('User not found in database');
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    console.log('User found, updating avatar_url...');
+    user.avatar_url = base64Image;
+    
+    console.log('Saving user to database...');
     await userRepo.save(user);
-    res.json({ message: 'Avatar uploaded', avatar_url: avatarUrl });
+    
+    console.log('Avatar saved to database successfully');
+    res.json({ message: 'Avatar uploaded', avatar_url: base64Image });
   } catch (error) {
     console.error('❌ Avatar upload error:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json({ message: 'Avatar upload failed', error: error.message });
   }
 });
@@ -1278,11 +1449,10 @@ app.post('/files/:id/share', authenticate, async (req, res) => {
     const fileRepo = AppDataSource.getRepository(File);
     const file = await fileRepo.findOne({ where: { id: req.params.id, user_id: req.user.id } });
     if (!file) return res.status(404).json({ message: 'File not found' });
-    let sharedWith = Array.isArray(file.shared_with) ? file.shared_with : [];
-    sharedWith = [...new Set([...sharedWith, ...userIds, ...emails])];
-    file.shared_with = sharedWith;
-    await fileRepo.save(file);
-    res.json({ message: 'File shared', shared_with: sharedWith });
+    
+    // Use the sharing system
+    const result = sharingSystem.shareItem('file', req.params.id, req.user.id, userIds, emails);
+    res.json(result);
   } catch (error) {
     res.status(500).json({ message: 'Share failed', error: error.message });
   }
@@ -1295,11 +1465,10 @@ app.post('/documents/:id/share', authenticate, async (req, res) => {
     const documentRepo = AppDataSource.getRepository(Document);
     const document = await documentRepo.findOne({ where: { id: req.params.id, userId: req.user.id } });
     if (!document) return res.status(404).json({ message: 'Document not found' });
-    let sharedWith = Array.isArray(document.shared_with) ? document.shared_with : [];
-    sharedWith = [...new Set([...sharedWith, ...userIds, ...emails])];
-    document.shared_with = sharedWith;
-    await documentRepo.save(document);
-    res.json({ message: 'Document shared', shared_with: sharedWith });
+    
+    // Use the sharing system
+    const result = sharingSystem.shareItem('document', req.params.id, req.user.id, userIds, emails);
+    res.json(result);
   } catch (error) {
     res.status(500).json({ message: 'Share failed', error: error.message });
   }
@@ -1308,16 +1477,40 @@ app.post('/documents/:id/share', authenticate, async (req, res) => {
 // --- Get Shared Files/Documents ---
 app.get('/shared', authenticate, async (req, res) => {
   try {
+    console.log('🔍 Fetching shared items for user:', req.user.id, req.user.email);
+    const sharedItems = sharingSystem.getSharedItems(req.user.id, req.user.email);
+    console.log('📋 Shared items found:', sharedItems);
+    
+    // Fetch the actual file and document data
     const fileRepo = AppDataSource.getRepository(File);
     const documentRepo = AppDataSource.getRepository(Document);
-    const userId = req.user.id;
-    const userEmail = req.user.email;
-    const files = await fileRepo.find();
-    const documents = await documentRepo.find();
-    const sharedFiles = files.filter(f => Array.isArray(f.shared_with) && (f.shared_with.includes(userId) || f.shared_with.includes(userEmail)));
-    const sharedDocuments = documents.filter(d => Array.isArray(d.shared_with) && (d.shared_with.includes(userId) || d.shared_with.includes(userEmail)));
+    
+    let sharedFiles = [];
+    let sharedDocuments = [];
+    
+    if (sharedItems.files.length > 0) {
+      console.log('📄 Fetching shared files with IDs:', sharedItems.files);
+      // Handle both integer and string IDs for files
+      const fileIds = sharedItems.files.map(id => isNaN(parseInt(id)) ? id : parseInt(id));
+      sharedFiles = await fileRepo.createQueryBuilder('file')
+        .where('file.id IN (:...ids)', { ids: fileIds })
+        .getMany();
+      console.log('✅ Found shared files:', sharedFiles.length);
+    }
+      
+    if (sharedItems.documents.length > 0) {
+      console.log('📝 Fetching shared documents with IDs:', sharedItems.documents);
+      // Documents use UUID strings
+      sharedDocuments = await documentRepo.createQueryBuilder('document')
+        .where('document.id IN (:...ids)', { ids: sharedItems.documents })
+        .getMany();
+      console.log('✅ Found shared documents:', sharedDocuments.length);
+    }
+    
+    console.log('📤 Returning shared items:', { files: sharedFiles.length, documents: sharedDocuments.length });
     res.json({ files: sharedFiles, documents: sharedDocuments });
   } catch (error) {
+    console.error('❌ Error fetching shared items:', error);
     res.status(500).json({ message: 'Failed to fetch shared items', error: error.message });
   }
 });
@@ -1346,11 +1539,13 @@ app.get("/api/projects", authenticate, async (req, res) => {
     console.log("Repository acquired");
     // Fetch all projects with relations
     const projects = await projectRepo.find({
-      relations: ['team', 'tasks']
+      relations: ['team', 'tasks', 'team.members']
     });
-    console.log("Projects fetched:", projects.length);
-    // Optionally filter by team membership here if needed
-    res.json(projects);
+    const filtered = projects.filter(
+      p => p.team && p.team.members && p.team.members.some(m => m.id === req.user.id)
+    );
+    console.log("Projects filtered by team membership:", filtered.length);
+    res.json(filtered);
   } catch (error) {
     console.error("❌ Error in /api/projects:", error);
     res.status(500).json({ message: 'Failed to fetch projects', error: error.message });
@@ -1506,7 +1701,7 @@ app.post("/api/projects/:projectId/tasks", authenticate, async (req, res) => {
       assignedUserId: assignedUserId || null,
       priority: priority || null,
       dueDate: dueDate ? new Date(dueDate) : null,
-      status: "To Do"
+      status: assignedUserId ? "In Progress" : "To Do"
     });
 
     await taskRepo.save(newTask);
@@ -1544,13 +1739,23 @@ app.put("/api/tasks/:id", authenticate, async (req, res) => {
     if (!hasAccess) {
       return res.status(403).json({ message: "Access denied" });
     }
-    // If assignedUserId is provided and different, allow only admin/lead (implement your own admin check if needed)
-    if (assignedUserId && assignedUserId !== task.assignedUserId) {
-      // TODO: Add admin/lead check here if you have roles
+    // Enforce status based on assignment, regardless of whether the assignee changed
+    if (assignedUserId) {
       task.assignedUserId = assignedUserId;
-      // If status is not provided, set to In Progress
-      if (!status) task.status = "In Progress";
+      if (status === "Done") {
+        task.status = "Done";
+      } else {
+        task.status = "In Progress";
+      }
+    } else {
+      task.assignedUserId = null;
+      if (status === "Done") {
+        task.status = "Done";
+      } else {
+        task.status = "To Do";
+      }
     }
+    
     task.title = title || task.title;
     task.description = description || task.description;
     task.status = status || task.status;
@@ -1558,7 +1763,18 @@ app.put("/api/tasks/:id", authenticate, async (req, res) => {
     task.dueDate = dueDate ? new Date(dueDate) : task.dueDate;
     task.updatedAt = new Date();
     await taskRepo.save(task);
-    // Fetch the updated task with assigned user
+    
+    // Create notification if task was assigned to someone new
+    if (assignedUserId && assignedUserId !== task.assignedUserId) {
+      await createNotification(
+        assignedUserId,
+        'task_assigned',
+        'Task Assigned',
+        `You've been assigned to task "${task.title}" in project "${task.project.name}"`,
+        { taskId: task.id, projectId: task.project.id, projectName: task.project.name }
+      );
+    }
+    
     const updatedTask = await taskRepo.findOne({
       where: { id: task.id },
       relations: ["assignedUser"]
@@ -1647,9 +1863,593 @@ app.patch("/api/tasks/:id/complete", authenticate, async (req, res) => {
   }
 });
 
+// ===============================
+//     CALENDAR EVENTS ROUTES
+// ===============================
+
+// Get all events for the authenticated user
+app.get("/api/calendar/events", authenticate, async (req, res) => {
+  try {
+    const eventRepo = AppDataSource.getRepository("Event");
+    const events = await eventRepo.find({ where: { userId: req.user.id } });
+    res.json(events);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch events", error: error.message });
+  }
+});
+
+// Create a new event
+app.post("/api/calendar/events", authenticate, async (req, res) => {
+  try {
+    const { title, description, start, end, allDay } = req.body;
+    const eventRepo = AppDataSource.getRepository("Event");
+    const newEvent = eventRepo.create({
+      title,
+      description,
+      start: new Date(start),
+      end: new Date(end),
+      allDay: !!allDay,
+      userId: req.user.id,
+    });
+    await eventRepo.save(newEvent);
+    res.status(201).json(newEvent);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to create event", error: error.message });
+  }
+});
+
+// Update an event
+app.put("/api/calendar/events/:id", authenticate, async (req, res) => {
+  try {
+    const eventRepo = AppDataSource.getRepository("Event");
+    const event = await eventRepo.findOne({ where: { id: req.params.id, userId: req.user.id } });
+    if (!event) return res.status(404).json({ message: "Event not found" });
+    const { title, description, start, end, allDay } = req.body;
+    event.title = title || event.title;
+    event.description = description || event.description;
+    event.start = start ? new Date(start) : event.start;
+    event.end = end ? new Date(end) : event.end;
+    event.allDay = typeof allDay === 'boolean' ? allDay : event.allDay;
+    await eventRepo.save(event);
+    res.json(event);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to update event", error: error.message });
+  }
+});
+
+// Delete an event
+app.delete("/api/calendar/events/:id", authenticate, async (req, res) => {
+  try {
+    const eventRepo = AppDataSource.getRepository("Event");
+    const event = await eventRepo.findOne({ where: { id: req.params.id, userId: req.user.id } });
+    if (!event) return res.status(404).json({ message: "Event not found" });
+    await eventRepo.remove(event);
+    res.json({ message: "Event deleted" });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to delete event", error: error.message });
+  }
+});
+
+// Download a generated text file
+app.get('/api/download/text', authenticate, (req, res) => {
+  const content = 'This is a generated text file!';
+  res.setHeader('Content-Type', 'text/plain');
+  res.setHeader('Content-Disposition', 'attachment; filename="generated.txt"');
+  res.send(content);
+});
+
+// Download a generated doc file
+app.get('/api/download/doc', authenticate, (req, res) => {
+  const content = 'This is a generated Word document (as plain text for demo).';
+  res.setHeader('Content-Type', 'application/msword');
+  res.setHeader('Content-Disposition', 'attachment; filename="generated.doc"');
+  res.send(content);
+});
+
+// Endpoint to get a signed URL for a file
+app.get("/files/signed-url", authenticate, async (req, res) => {
+  try {
+    const key = req.query.key;
+    console.log("[SIGNED URL] Requested S3 key:", key);
+    if (!key) return res.status(400).json({ message: "Missing S3 key" });
+    
+    // Check if user has access to this file
+    const fileRepo = AppDataSource.getRepository(File);
+    const file = await fileRepo.findOne({ where: { s3Key: key } });
+    
+    if (!file) {
+      return res.status(404).json({ message: "File not found" });
+    }
+    
+    // Check if user owns the file or if it's shared with them
+    const isOwner = file.user_id === req.user.id;
+    const isShared = sharingSystem.isItemSharedWith('file', file.id, req.user.id, req.user.email);
+    
+    if (!isOwner && !isShared) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+    
+    const command = new GetObjectCommand({
+      Bucket: process.env.REACT_APP_AWS_BUCKET_NAME,
+      Key: key,
+    });
+    const url = await getSignedUrl(s3, command, { expiresIn: 60 * 5 }); // 5 minutes
+    res.json({ url });
+  } catch (error) {
+    console.error("Error generating signed URL:", error);
+    res.status(500).json({ message: "Failed to generate signed URL" });
+  }
+});
+
+// --- ZIP/RAR Extraction Endpoint with S3 upload and folder DB, always extract to a named folder ---
+app.post("/files/:id/extract", authenticate, async (req, res) => {
+  try {
+    const fileRepo = AppDataSource.getRepository(File);
+    const folderRepo = AppDataSource.getRepository(Folder);
+    const file = await fileRepo.findOne({ where: { id: req.params.id, user_id: req.user.id } });
+    if (!file) return res.status(404).json({ message: "File not found" });
+    const ext = path.extname(file.file_name).toLowerCase();
+    if (ext !== '.zip' && ext !== '.rar') {
+      return res.status(400).json({ message: "Not a zip or rar file" });
+    }
+    // Accept folder_name from request body
+    const folderName = req.body.folder_name && req.body.folder_name.trim() ? req.body.folder_name.trim() : path.basename(file.file_name, ext);
+    // Create/find the top-level folder in DB, as a child of the archive's folder
+    const parentId = file.folder_id || null;
+    let topFolder = await folderRepo.findOne({ where: { name: folderName, parent_id: parentId, user_id: req.user.id } });
+    if (!topFolder) {
+      // Compute path for the new folder
+      let parentFolder = null;
+      let folderPath = folderName;
+      if (parentId) {
+        parentFolder = await folderRepo.findOne({ where: { id: parentId, user_id: req.user.id } });
+        folderPath = parentFolder && parentFolder.path ? `${parentFolder.path}/${parentFolder.id}/${folderName}` : folderName;
+      }
+      topFolder = folderRepo.create({ name: folderName, parent_id: parentId, user_id: req.user.id, path: folderPath });
+      await folderRepo.save(topFolder);
+    }
+    // Download from S3 to temp file
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'extract-'));
+    const tempFilePath = path.join(tempDir, file.file_name.replace(/\s+/g, '_'));
+    const s3Stream = await s3.send(new GetObjectCommand({
+      Bucket: process.env.REACT_APP_AWS_BUCKET_NAME,
+      Key: file.s3Key
+    }));
+    const writeStream = fs.createWriteStream(tempFilePath);
+    await new Promise((resolve, reject) => {
+      s3Stream.Body.pipe(writeStream);
+      s3Stream.Body.on('end', resolve);
+      s3Stream.Body.on('error', reject);
+    });
+    // Extract
+    let extractedFiles = [];
+    if (ext === '.zip') {
+      const zip = new AdmZip(tempFilePath);
+      zip.extractAllTo(tempDir, true);
+      extractedFiles = zip.getEntries().filter(e => !e.isDirectory).map(e => e.entryName);
+    } else if (ext === '.rar') {
+      const data = fs.readFileSync(tempFilePath);
+      const extractor = Unrar.createExtractorFromData(data);
+      const extracted = extractor.extractAll();
+      extractedFiles = [];
+      extracted.files.forEach(fileEntry => {
+        if (fileEntry.extraction && fileEntry.fileHeader.name) {
+          const outPath = path.join(tempDir, fileEntry.fileHeader.name);
+          fs.mkdirSync(path.dirname(outPath), { recursive: true });
+          fs.writeFileSync(outPath, fileEntry.extraction);
+          extractedFiles.push(fileEntry.fileHeader.name);
+        }
+      });
+    }
+    // --- Upload extracted files to S3 and create folders/files in DB ---
+    const uploadedFiles = [];
+    for (const relPath of extractedFiles) {
+      const absPath = path.join(tempDir, relPath);
+      // Always prefix with the chosen folder name
+      const archiveRelPath = path.join(folderName, relPath).replace(/\\/g, '/');
+      // Parse folder structure
+      const parts = archiveRelPath.split(/[\\/]/); // works for zip and rar
+      const fileName = parts.pop();
+      let parentId = topFolder.id;
+      let folderPath = folderName;
+      // For each folder in the path (after the top folder), create/find it in DB
+      for (const folderNamePart of parts.slice(1)) { // skip the first (top folder)
+        folderPath = folderPath + '/' + folderNamePart;
+        let folder = await folderRepo.findOne({ where: { name: folderNamePart, parent_id: parentId, user_id: req.user.id } });
+        if (!folder) {
+          folder = folderRepo.create({ name: folderNamePart, parent_id: parentId, user_id: req.user.id, path: folderPath });
+          await folderRepo.save(folder);
+        }
+        parentId = folder.id;
+      }
+      // Upload file to S3
+      const s3Key = `files/${req.user.id}/${archiveRelPath}`;
+      const fileBuffer = fs.readFileSync(absPath);
+      await s3.send(new PutObjectCommand({
+        Bucket: process.env.REACT_APP_AWS_BUCKET_NAME,
+        Key: s3Key,
+        Body: fileBuffer,
+        ContentType: undefined // Let S3 guess
+      }));
+      const fileUrl = `https://${process.env.REACT_APP_AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION || 'ap-southeast-2'}.amazonaws.com/${s3Key}`;
+      // Ensure unique file name in the target folder
+      const extExtract = path.extname(fileName);
+      const baseNameExtract = path.basename(fileName, extExtract);
+      const uniqueNameExtract = await getUniqueFileName(fileRepo, req.user.id, parentId, baseNameExtract, extExtract);
+      const newFile = fileRepo.create({
+        user_id: req.user.id,
+        file_name: uniqueNameExtract,
+        file_url: fileUrl,
+        s3Key: s3Key,
+        folder_id: parentId,
+        uploaded_at: new Date()
+      });
+      await fileRepo.save(newFile);
+      uploadedFiles.push({ file: uniqueNameExtract, folder: folderPath, url: fileUrl });
+    }
+    res.json({ message: "Extracted and uploaded", files: uploadedFiles });
+  } catch (error) {
+    console.error("Extract error:", error);
+    res.status(500).json({ message: "Extraction failed", error: error.message });
+  }
+});
+// --- END ZIP/RAR Extraction Endpoint ---
+
 // Add a global error handler at the end of the file
 app.use((err, req, res, next) => {
   console.error("❌ Uncaught error:", err);
   res.status(500).json({ message: "Internal server error", error: err.message });
 });
     
+// Promote a user to admin (creator only)
+app.post('/api/teams/:teamId/members/:memberId/promote', authenticate, async (req, res) => {
+  const { teamId, memberId } = req.params;
+  const teamRepo = AppDataSource.getRepository("Team");
+  const team = await teamRepo.findOne({ where: { id: teamId } });
+  if (!team) return res.status(404).json({ message: "Team not found" });
+  if (String(team.creatorId) !== String(req.user.id)) return res.status(403).json({ message: "Only creator can promote" });
+
+  await AppDataSource.query(
+    `UPDATE team_members SET role = 'admin' WHERE team_id = ? AND user_id = ? AND role != 'creator'`,
+    [teamId, memberId]
+  );
+  res.json({ message: "Promoted to admin" });
+});
+
+// Demote an admin to user (creator only)
+app.post('/api/teams/:teamId/members/:memberId/demote', authenticate, async (req, res) => {
+  const { teamId, memberId } = req.params;
+  const teamRepo = AppDataSource.getRepository("Team");
+  const team = await teamRepo.findOne({ where: { id: teamId } });
+  if (!team) return res.status(404).json({ message: "Team not found" });
+  if (String(team.creatorId) !== String(req.user.id)) return res.status(403).json({ message: "Only creator can demote" });
+
+  await AppDataSource.query(
+    `UPDATE team_members SET role = 'user' WHERE team_id = ? AND user_id = ? AND role = 'admin'`,
+    [teamId, memberId]
+  );
+  res.json({ message: "Demoted to user" });
+});
+
+// Update team members API to return roles
+app.get("/api/teams/:teamId/members", authenticate, async (req, res) => {
+  try {
+    const teamId = req.params.teamId;
+    const members = await AppDataSource.query(
+      `SELECT u.id, u.username, u.email, u.avatar_url, tm.role
+       FROM users u
+       JOIN team_members tm ON tm.user_id = u.id
+       WHERE tm.team_id = ?`,
+      [teamId]
+    );
+    res.json({ members });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch team members", error: error.message });
+  }
+});
+
+// Accept team invitation
+app.post("/api/teams/:teamId/invitations/:invitationId/accept", authenticate, async (req, res) => {
+  try {
+    const { teamId, invitationId } = req.params;
+    const invitationRepo = AppDataSource.getRepository("Invitation");
+    const teamRepo = AppDataSource.getRepository("Team");
+    
+    // Find the invitation
+    const invitation = await invitationRepo.findOne({
+      where: { id: invitationId, teamId, inviteeId: req.user.id, status: "pending" }
+    });
+    
+    if (!invitation) {
+      return res.status(404).json({ message: "Invitation not found or already processed" });
+    }
+    
+    // Check if team exists
+    const team = await teamRepo.findOne({ where: { id: teamId } });
+    if (!team) {
+      return res.status(404).json({ message: "Team not found" });
+    }
+    
+    // Add user to team
+    await AppDataSource.query(
+      `INSERT INTO team_members (team_id, user_id, role) VALUES (?, ?, 'user')`,
+      [teamId, req.user.id]
+    );
+    
+    // Update invitation status
+    invitation.status = "accepted";
+    await invitationRepo.save(invitation);
+    
+    // Create notification for team creator
+    await createNotification(
+      team.creatorId,
+      'invitation',
+      'Invitation Accepted',
+      `${req.user.username || req.user.name} accepted your invitation to join "${team.name}"`,
+      { teamId, teamName: team.name, acceptedBy: req.user.id }
+    );
+    
+    res.json({ message: "Invitation accepted successfully" });
+  } catch (error) {
+    console.error("❌ Error accepting invitation:", error);
+    res.status(500).json({ message: "Failed to accept invitation", error: error.message });
+  }
+});
+
+// Decline team invitation
+app.post("/api/teams/:teamId/invitations/:invitationId/decline", authenticate, async (req, res) => {
+  try {
+    const { teamId, invitationId } = req.params;
+    const invitationRepo = AppDataSource.getRepository("Invitation");
+    const teamRepo = AppDataSource.getRepository("Team");
+    
+    // Find the invitation
+    const invitation = await invitationRepo.findOne({
+      where: { id: invitationId, teamId, inviteeId: req.user.id, status: "pending" }
+    });
+    
+    if (!invitation) {
+      return res.status(404).json({ message: "Invitation not found or already processed" });
+    }
+    
+    // Check if team exists
+    const team = await teamRepo.findOne({ where: { id: teamId } });
+    if (!team) {
+      return res.status(404).json({ message: "Team not found" });
+    }
+    
+    // Update invitation status
+    invitation.status = "declined";
+    await invitationRepo.save(invitation);
+    
+    // Create notification for team creator
+    await createNotification(
+      team.creatorId,
+      'invitation',
+      'Invitation Declined',
+      `${req.user.username || req.user.name} declined your invitation to join "${team.name}"`,
+      { teamId, teamName: team.name, declinedBy: req.user.id }
+    );
+    
+    res.json({ message: "Invitation declined successfully" });
+  } catch (error) {
+    console.error("❌ Error declining invitation:", error);
+    res.status(500).json({ message: "Failed to decline invitation", error: error.message });
+  }
+});
+
+// Get pending invitations for the authenticated user
+app.get("/api/teams/invitations", authenticate, async (req, res) => {
+  try {
+    const invitationRepo = AppDataSource.getRepository("Invitation");
+    const invitations = await invitationRepo.find({
+      where: { inviteeId: req.user.id, status: "pending" },
+      relations: ["team"]
+    });
+    res.json({ invitations });
+  } catch (error) {
+    console.error("❌ Error fetching invitations:", error);
+    res.status(500).json({ message: "Failed to fetch invitations", error: error.message });
+  }
+});
+
+/* ===============================
+        🔔 NOTIFICATION ROUTES
+================================ */
+
+// Get all notifications for the authenticated user
+app.get("/api/notifications", authenticate, async (req, res) => {
+  try {
+    const notificationRepo = AppDataSource.getRepository("Notification");
+    const notifications = await notificationRepo.find({
+      where: { userId: req.user.id },
+      order: { createdAt: "DESC" }
+    });
+    res.json({ notifications });
+  } catch (error) {
+    console.error("❌ Error fetching notifications:", error);
+    res.status(500).json({ message: "Failed to fetch notifications", error: error.message });
+  }
+});
+
+// Mark notification as read
+app.patch("/api/notifications/:id/read", authenticate, async (req, res) => {
+  try {
+    const notificationRepo = AppDataSource.getRepository("Notification");
+    const notification = await notificationRepo.findOne({
+      where: { id: req.params.id, userId: req.user.id }
+    });
+    if (!notification) {
+      return res.status(404).json({ message: "Notification not found" });
+    }
+    notification.isRead = true;
+    await notificationRepo.save(notification);
+    res.json({ message: "Notification marked as read" });
+  } catch (error) {
+    console.error("❌ Error marking notification as read:", error);
+    res.status(500).json({ message: "Failed to mark notification as read", error: error.message });
+  }
+});
+
+// Mark all notifications as read
+app.patch("/api/notifications/read-all", authenticate, async (req, res) => {
+  try {
+    const notificationRepo = AppDataSource.getRepository("Notification");
+    await notificationRepo.update(
+      { userId: req.user.id, isRead: false },
+      { isRead: true }
+    );
+    res.json({ message: "All notifications marked as read" });
+  } catch (error) {
+    console.error("❌ Error marking all notifications as read:", error);
+    res.status(500).json({ message: "Failed to mark notifications as read", error: error.message });
+  }
+});
+
+// Delete a notification
+app.delete("/api/notifications/:id", authenticate, async (req, res) => {
+  try {
+    const notificationRepo = AppDataSource.getRepository("Notification");
+    const notification = await notificationRepo.findOne({
+      where: { id: req.params.id, userId: req.user.id }
+    });
+    if (!notification) {
+      return res.status(404).json({ message: "Notification not found" });
+    }
+    await notificationRepo.remove(notification);
+    res.json({ message: "Notification deleted" });
+  } catch (error) {
+    console.error("❌ Error deleting notification:", error);
+    res.status(500).json({ message: "Failed to delete notification", error: error.message });
+  }
+});
+
+// Helper function to create notifications
+async function createNotification(userId, type, title, message, data = null) {
+  try {
+    const notificationRepo = AppDataSource.getRepository("Notification");
+    const notification = notificationRepo.create({
+      userId,
+      type,
+      title,
+      message,
+      data
+    });
+    await notificationRepo.save(notification);
+    
+    // Emit real-time notification via Socket.IO
+    io.to(`user-${userId}`).emit('new-notification', notification);
+    
+    return notification;
+  } catch (error) {
+    console.error("❌ Error creating notification:", error);
+  }
+}
+
+/* ===============================
+        📅 CALENDAR ROUTES
+================================ */
+
+// Get all calendar events for the authenticated user
+app.get("/api/calendar/events", authenticate, async (req, res) => {
+  try {
+    const eventRepo = AppDataSource.getRepository("CalendarEvent");
+    const events = await eventRepo.find({
+      where: { userId: req.user.id },
+      order: { start: "ASC" }
+    });
+    res.json(events);
+  } catch (error) {
+    console.error("❌ Error fetching calendar events:", error);
+    res.status(500).json({ message: "Failed to fetch calendar events", error: error.message });
+  }
+});
+
+// Create a new calendar event
+app.post("/api/calendar/events", authenticate, async (req, res) => {
+  try {
+    const { title, description, start, end, allDay } = req.body;
+    const eventRepo = AppDataSource.getRepository("CalendarEvent");
+    
+    const event = eventRepo.create({
+      userId: req.user.id,
+      title,
+      description,
+      start: new Date(start),
+      end: new Date(end),
+      allDay: allDay || false
+    });
+    
+    const savedEvent = await eventRepo.save(event);
+    res.status(201).json(savedEvent);
+  } catch (error) {
+    console.error("❌ Error creating calendar event:", error);
+    res.status(500).json({ message: "Failed to create calendar event", error: error.message });
+  }
+});
+
+// Update a calendar event
+app.put("/api/calendar/events/:id", authenticate, async (req, res) => {
+  try {
+    const { title, description, start, end, allDay } = req.body;
+    const eventRepo = AppDataSource.getRepository("CalendarEvent");
+    
+    const event = await eventRepo.findOne({
+      where: { id: req.params.id, userId: req.user.id }
+    });
+    
+    if (!event) {
+      return res.status(404).json({ message: "Event not found" });
+    }
+    
+    event.title = title || event.title;
+    event.description = description || event.description;
+    event.start = start ? new Date(start) : event.start;
+    event.end = end ? new Date(end) : event.end;
+    event.allDay = allDay !== undefined ? allDay : event.allDay;
+    
+    const updatedEvent = await eventRepo.save(event);
+    res.json(updatedEvent);
+  } catch (error) {
+    console.error("❌ Error updating calendar event:", error);
+    res.status(500).json({ message: "Failed to update calendar event", error: error.message });
+  }
+});
+
+// Delete a calendar event
+app.delete("/api/calendar/events/:id", authenticate, async (req, res) => {
+  try {
+    const eventRepo = AppDataSource.getRepository("CalendarEvent");
+    const event = await eventRepo.findOne({
+      where: { id: req.params.id, userId: req.user.id }
+    });
+    
+    if (!event) {
+      return res.status(404).json({ message: "Event not found" });
+    }
+    
+    await eventRepo.remove(event);
+    res.json({ message: "Event deleted successfully" });
+  } catch (error) {
+    console.error("❌ Error deleting calendar event:", error);
+    res.status(500).json({ message: "Failed to delete calendar event", error: error.message });
+  }
+});
+
+// Add CalendarEvent entity schema
+const CalendarEvent = new EntitySchema({
+  name: "CalendarEvent",
+  tableName: "calendar_events",
+  columns: {
+    id: { primary: true, type: "varchar", length: 255, generated: "uuid" },
+    userId: { type: "varchar", length: 255 },
+    title: { type: "varchar", length: 255 },
+    description: { type: "text", nullable: true },
+    start: { type: "datetime" },
+    end: { type: "datetime" },
+    allDay: { type: "boolean", default: false },
+    createdAt: { type: "datetime", createDate: true },
+    updatedAt: { type: "datetime", updateDate: true }
+  }
+});
+

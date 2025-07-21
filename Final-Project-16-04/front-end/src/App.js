@@ -8,6 +8,7 @@ import ForgotPassword from "./Pages/ForgotPassword";
 import ResetPassword from "./Pages/ResetPassword";
 import TextEditor from "./Pages/TextEditor";
 import Teams from './Pages/Teams';
+import Notifications from './Pages/Notifications';
 import { isAuthenticated, verifyToken, isRememberMeEnabled, getToken, setTokenWithExpiry } from "./utils/auth";
 import Sidebar from './components/Sidebar';
 import MainLayout from "./components/MainLayout";
@@ -15,6 +16,7 @@ import TeamChat from "./components/TeamChat";
 import ProjectsPage from "./Pages/ProjectsPage";
 import ProjectDetailPage from "./Pages/ProjectDetailPage";
 import CalendarPage from "./Pages/CalendarPage";
+import MyTasksPage from './Pages/MyTasksPage';
 
 // Create Authentication Context
 export const AuthContext = createContext({
@@ -266,6 +268,30 @@ function App() {
               authState.isAuthenticated ? (
                 <MainLayout teams={teams}>
                   <TeamChat user={authState.user} teams={teams} />
+                </MainLayout>
+              ) : (
+                <Navigate to="/login" />
+              )
+            }
+          />
+          <Route
+            path="/my-tasks"
+            element={
+              authState.isAuthenticated ? (
+                <MainLayout teams={teams}>
+                  <MyTasksPage />
+                </MainLayout>
+              ) : (
+                <Navigate to="/login" />
+              )
+            }
+          />
+          <Route
+            path="/notifications"
+            element={
+              authState.isAuthenticated ? (
+                <MainLayout teams={teams}>
+                  <Notifications />
                 </MainLayout>
               ) : (
                 <Navigate to="/login" />

@@ -1,272 +1,388 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Calendar, momentLocalizer } from 'react-big-calendar';
-import moment from 'moment';
-import 'react-big-calendar/lib/css/react-big-calendar.css';
-import { MdAdd, MdClose, MdDelete, MdEdit } from 'react-icons/md';
+import React, { useState, useEffect, useContext } from 'react';
+import { AuthContext } from '../App';
+import { FiCalendar, FiPlus, FiClock, FiUsers, FiFileText } from 'react-icons/fi';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
-const localizer = momentLocalizer(moment);
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 const CalendarPage = () => {
+  const { user } = useContext(AuthContext);
+  const [currentDate, setCurrentDate] = useState(new Date());
   const [events, setEvents] = useState([]);
+  const [projects, setProjects] = useState([]);
+  const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [showModal, setShowModal] = useState(false);
-  const [selectedEvent, setSelectedEvent] = useState(null);
+  const [showEventModal, setShowEventModal] = useState(false);
+  const [newEvent, setNewEvent] = useState({
+    title: '',
+    description: '',
+    start: '',
+    end: '',
+    allDay: false
+  });
 
-  const fetchEvents = useCallback(async () => {
+  useEffect(() => {
+    fetchCalendarData();
+  }, []);
+
+  const fetchCalendarData = async () => {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
-      const response = await fetch(`${API_BASE_URL}/calendar/events`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!response.ok) throw new Error('Failed to fetch events');
-      const data = await response.json();
-      const formattedEvents = data.map(event => ({
-        ...event,
-        start: new Date(event.start),
-        end: new Date(event.end),
-      }));
-      setEvents(formattedEvents);
-    } catch (err) {
-      setError(err.message);
+      
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+
+      // Fetch events, projects, and tasks in parallel
+      const [eventsResponse, projectsResponse, tasksResponse] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/calendar/events`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        }),
+        fetch(`${API_BASE_URL}/api/projects`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        }),
+        fetch(`${API_BASE_URL}/api/tasks`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        })
+      ]);
+
+      const eventsData = eventsResponse.ok ? await eventsResponse.json() : [];
+      const projectsData = projectsResponse.ok ? await projectsResponse.json() : [];
+      const tasksData = tasksResponse.ok ? await tasksResponse.json() : [];
+
+      setEvents(eventsData);
+      setProjects(projectsData);
+      setTasks(tasksData);
+    } catch (error) {
+      console.error('Error fetching calendar data:', error);
     } finally {
       setLoading(false);
     }
-  }, []);
-
-  useEffect(() => {
-    fetchEvents();
-  }, [fetchEvents]);
-
-  const handleSelectSlot = useCallback(({ start, end }) => {
-    setSelectedEvent({ start, end, allDay: true });
-    setShowModal(true);
-  }, []);
-
-  const handleSelectEvent = useCallback((event) => {
-    if (event.resource.type === 'task') {
-        alert(`Task: ${event.title}\nDue on: ${moment(event.start).format('LL')}`);
-        return;
-    }
-    if (event.resource.type === 'project') {
-        alert(`Project Deadline: ${event.title.replace('(Project Deadline) ', '')}\nDue on: ${moment(event.start).format('LL')}`);
-        return;
-    }
-    setSelectedEvent(event);
-    setShowModal(true);
-  }, []);
-
-  const handleCloseModal = () => {
-    setShowModal(false);
-    setSelectedEvent(null);
   };
 
-  const handleSaveEvent = async (eventData) => {
-    const isUpdate = !!eventData.id;
-    const method = isUpdate ? 'PUT' : 'POST';
-    const eventId = isUpdate ? eventData.id.replace('event-', '') : '';
-    const url = `${API_BASE_URL}/calendar/events/${eventId}`;
-
-    try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(eventData),
-      });
-
-      if (!response.ok) throw new Error('Failed to save event');
-      fetchEvents(); // Refresh events
-      handleCloseModal();
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
-  const handleDeleteEvent = async (eventId) => {
-    if (!window.confirm('Are you sure you want to delete this event?')) return;
-    
-    const realId = eventId.replace('event-', '');
-    try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${API_BASE_URL}/calendar/events/${realId}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (!response.ok) throw new Error('Failed to delete event');
-      fetchEvents(); // Refresh events
-      handleCloseModal();
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
-  const eventStyleGetter = (event) => {
-    const isTask = event.resource.type === 'task';
-    const isProject = event.resource.type === 'project';
-    let backgroundColor = '#4299e1'; // Default blue for custom events
-    if (isTask) backgroundColor = '#f56565'; // Red for tasks
-    if (isProject) backgroundColor = '#f6ad55'; // Orange for project deadlines
-
-    const style = {
-      backgroundColor,
-      borderRadius: '5px',
-      opacity: 0.8,
-      color: 'white',
-      border: '0px',
-      display: 'block',
-    };
-    return { style };
-  };
-
-  if (loading) return <div>Loading...</div>;
-  if (error) return <div>Error: {error}</div>;
-
-  return (
-    <div className="container mx-auto p-6">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold text-gray-900">Calendar</h1>
-        <button
-          onClick={() => {
-            setSelectedEvent(null);
-            setShowModal(true);
-          }}
-          className="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 flex items-center"
-        >
-          <MdAdd className="mr-2" /> Add Event
-        </button>
-      </div>
-
-      <div className="bg-white p-4 rounded-lg shadow-md" style={{ height: '75vh' }}>
-        <Calendar
-          localizer={localizer}
-          events={events}
-          startAccessor="start"
-          endAccessor="end"
-          style={{ height: '100%' }}
-          selectable
-          onSelectSlot={handleSelectSlot}
-          onSelectEvent={handleSelectEvent}
-          eventPropGetter={eventStyleGetter}
-        />
-      </div>
-
-      {showModal && (
-        <EventModal
-          event={selectedEvent}
-          onClose={handleCloseModal}
-          onSave={handleSaveEvent}
-          onDelete={handleDeleteEvent}
-        />
-      )}
-    </div>
-  );
-};
-
-const EventModal = ({ event, onClose, onSave, onDelete }) => {
-  const [title, setTitle] = useState(event?.title || '');
-  const [description, setDescription] = useState(event?.resource?.description || '');
-  const [start, setStart] = useState(moment(event?.start).format('YYYY-MM-DDTHH:mm'));
-  const [end, setEnd] = useState(moment(event?.end).format('YYYY-MM-DDTHH:mm'));
-  const [allDay, setAllDay] = useState(event?.allDay || false);
-
-  const handleSubmit = (e) => {
+  const createEvent = async (e) => {
     e.preventDefault();
-    onSave({ id: event?.id, title, description, start, end, allDay });
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_BASE_URL}/api/calendar/events`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(newEvent)
+      });
+
+      if (response.ok) {
+        const createdEvent = await response.json();
+        setEvents(prev => [...prev, createdEvent]);
+        setShowEventModal(false);
+        setNewEvent({ title: '', description: '', start: '', end: '', allDay: false });
+      }
+    } catch (error) {
+      console.error('Error creating event:', error);
+    }
   };
 
+  const getDaysInMonth = (date) => {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const daysInMonth = lastDay.getDate();
+    const startingDay = firstDay.getDay();
+    
+    const days = [];
+    
+    // Add empty cells for days before the first day of the month
+    for (let i = 0; i < startingDay; i++) {
+      days.push(null);
+    }
+    
+    // Add all days of the month
+    for (let i = 1; i <= daysInMonth; i++) {
+      days.push(new Date(year, month, i));
+    }
+    
+    return days;
+  };
+
+  const getEventsForDate = (date) => {
+    if (!date) return [];
+    
+    const dateStr = date.toISOString().split('T')[0];
+    const allEvents = [
+      ...events.map(event => ({ ...event, type: 'event' })),
+      ...projects.filter(project => project.dueDate).map(project => ({
+        id: project.id,
+        title: project.name,
+        start: project.dueDate,
+        type: 'project',
+        description: project.description
+      })),
+      ...tasks.filter(task => task.dueDate).map(task => ({
+        id: task.id,
+        title: task.title,
+        start: task.dueDate,
+        type: 'task',
+        description: task.description,
+        status: task.status
+      }))
+    ];
+
+    return allEvents.filter(event => {
+      const eventDate = new Date(event.start).toISOString().split('T')[0];
+      return eventDate === dateStr;
+    });
+  };
+
+  const getEventIcon = (type) => {
+    switch (type) {
+      case 'event':
+        return <FiCalendar className="w-3 h-3" />;
+      case 'project':
+        return <FiUsers className="w-3 h-3" />;
+      case 'task':
+        return <FiFileText className="w-3 h-3" />;
+      default:
+        return <FiClock className="w-3 h-3" />;
+    }
+  };
+
+  const getEventColor = (type, status) => {
+    if (type === 'task') {
+      switch (status) {
+        case 'Done':
+          return 'bg-green-100 text-green-800';
+        case 'In Progress':
+          return 'bg-blue-100 text-blue-800';
+        default:
+          return 'bg-yellow-100 text-yellow-800';
+      }
+    }
+    
+    switch (type) {
+      case 'event':
+        return 'bg-purple-100 text-purple-800';
+      case 'project':
+        return 'bg-indigo-100 text-indigo-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const navigateMonth = (direction) => {
+    setCurrentDate(prev => {
+      const newDate = new Date(prev);
+      newDate.setMonth(prev.getMonth() + direction);
+      return newDate;
+    });
+  };
+
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center py-12">
+        <div className="loading-spinner"></div>
+      </div>
+    );
+  }
+
+  const days = getDaysInMonth(currentDate);
+  const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-bold">{event?.id ? 'Edit Event' : 'Add Event'}</h2>
-          <button onClick={onClose}><MdClose /></button>
+    <div className="h-full">
+      <main className="h-full">
+        <div className="px-4 sm:px-6 lg:px-8 py-6">
+          <div className="flex justify-between items-center mb-8">
+            <h1 className="text-2xl font-semibold text-gray-900">Calendar</h1>
+            <button
+              onClick={() => setShowEventModal(true)}
+              className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200"
+            >
+              <FiPlus className="mr-2" />
+              Add Event
+            </button>
+          </div>
+
+          {/* Calendar Header */}
+          <div className="flex items-center justify-between mb-6">
+            <button
+              onClick={() => navigateMonth(-1)}
+              className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg"
+            >
+              ← Previous
+            </button>
+            <h2 className="text-xl font-semibold text-gray-900">
+              {monthNames[currentDate.getMonth()]} {currentDate.getFullYear()}
+            </h2>
+            <button
+              onClick={() => navigateMonth(1)}
+              className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg"
+            >
+              Next →
+            </button>
+          </div>
+
+          {/* Calendar Grid */}
+          <div className="bg-white rounded-lg shadow overflow-hidden">
+            {/* Day Headers */}
+            <div className="grid grid-cols-7 bg-gray-50">
+              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+                <div key={day} className="px-4 py-3 text-center text-sm font-medium text-gray-500">
+                  {day}
+                </div>
+              ))}
+            </div>
+
+            {/* Calendar Days */}
+            <div className="grid grid-cols-7">
+              {days.map((day, index) => {
+                const eventsForDay = getEventsForDate(day);
+                const isToday = day && day.toDateString() === new Date().toDateString();
+                const isCurrentMonth = day && day.getMonth() === currentDate.getMonth();
+
+                return (
+                  <div
+                    key={index}
+                    className={`min-h-[120px] border-r border-b border-gray-200 p-2 ${
+                      !isCurrentMonth ? 'bg-gray-50' : ''
+                    }`}
+                  >
+                    {day && (
+                      <>
+                        <div className={`text-sm font-medium mb-1 ${
+                          isToday ? 'bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center' : ''
+                        }`}>
+                          {day.getDate()}
+                        </div>
+                        <div className="space-y-1">
+                          {eventsForDay.slice(0, 3).map(event => (
+                            <div
+                              key={event.id}
+                              className={`text-xs px-2 py-1 rounded truncate flex items-center space-x-1 ${getEventColor(event.type, event.status)}`}
+                              title={event.title}
+                            >
+                              {getEventIcon(event.type)}
+                              <span className="truncate">{event.title}</span>
+                            </div>
+                          ))}
+                          {eventsForDay.length > 3 && (
+                            <div className="text-xs text-gray-500">
+                              +{eventsForDay.length - 3} more
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
-        <form onSubmit={handleSubmit}>
-          <div className="mb-4">
-            <label className="block text-sm font-bold mb-2">Title</label>
-            <input
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="input"
-              required
-            />
-          </div>
-          <div className="mb-4">
-            <label className="block text-sm font-bold mb-2">Description</label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="input"
-              rows="3"
-            />
-          </div>
-          <div className="mb-4">
-            <label className="block text-sm font-bold mb-2">Start</label>
-            <input
-              type="datetime-local"
-              value={start}
-              onChange={(e) => setStart(e.target.value)}
-              className="input"
-              required
-            />
-          </div>
-          <div className="mb-4">
-            <label className="block text-sm font-bold mb-2">End</label>
-            <input
-              type="datetime-local"
-              value={end}
-              onChange={(e) => setEnd(e.target.value)}
-              className="input"
-              required
-            />
-          </div>
-          <div className="mb-4 flex items-center">
-            <input
-              type="checkbox"
-              checked={allDay}
-              onChange={(e) => setAllDay(e.target.checked)}
-              className="mr-2"
-            />
-            <label>All day</label>
-          </div>
-          <div className="flex justify-between items-center">
-            <div>
-              {event?.id && (
+      </main>
+
+      {/* Add Event Modal */}
+      {showEventModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-96">
+            <h2 className="text-xl font-semibold mb-4">Add Event</h2>
+            <form onSubmit={createEvent}>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Title
+                  </label>
+                  <input
+                    type="text"
+                    value={newEvent.title}
+                    onChange={(e) => setNewEvent(prev => ({ ...prev, title: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Description
+                  </label>
+                  <textarea
+                    value={newEvent.description}
+                    onChange={(e) => setNewEvent(prev => ({ ...prev, description: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    rows="3"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Start Date
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={newEvent.start}
+                      onChange={(e) => setNewEvent(prev => ({ ...prev, start: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      End Date
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={newEvent.end}
+                      onChange={(e) => setNewEvent(prev => ({ ...prev, end: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="allDay"
+                    checked={newEvent.allDay}
+                    onChange={(e) => setNewEvent(prev => ({ ...prev, allDay: e.target.checked }))}
+                    className="mr-2"
+                  />
+                  <label htmlFor="allDay" className="text-sm text-gray-700">
+                    All day event
+                  </label>
+                </div>
+              </div>
+              <div className="flex justify-end space-x-3 mt-6">
                 <button
                   type="button"
-                  onClick={() => onDelete(event.id)}
-                  className="btn bg-red-500 text-white hover:bg-red-600"
+                  onClick={() => setShowEventModal(false)}
+                  className="px-4 py-2 text-gray-700 hover:text-gray-900"
                 >
-                  <MdDelete />
+                  Cancel
                 </button>
-              )}
-            </div>
-            <div className="flex space-x-2">
-              <button
-                type="button"
-                onClick={onClose}
-                className="btn bg-gray-500 text-white hover:bg-gray-600"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="btn bg-blue-500 text-white hover:bg-blue-600"
-              >
-                Save
-              </button>
-            </div>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                >
+                  Create Event
+                </button>
+              </div>
+            </form>
           </div>
-        </form>
-      </div>
+        </div>
+      )}
     </div>
   );
 };

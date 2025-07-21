@@ -6,12 +6,8 @@ module.exports = new EntitySchema({
   columns: {
     id: {
       primary: true,
-      type: "uuid",
-      generated: "uuid",
-    },
-    user_id: {
-      type: "uuid",
-      nullable: false,
+      type: "int",
+      generated: true,
     },
     name: {
       type: "varchar",
@@ -19,7 +15,7 @@ module.exports = new EntitySchema({
       nullable: false,
     },
     parent_id: {
-      type: "uuid",
+      type: "char",
       nullable: true,
     },
     path: {
@@ -32,24 +28,9 @@ module.exports = new EntitySchema({
       precision: 6,
       nullable: false,
       default: () => "CURRENT_TIMESTAMP(6)",
-    },
-    updated_at: {
-      type: "timestamp",
-      precision: 6,
-      nullable: false,
-      default: () => "CURRENT_TIMESTAMP(6)",
-      onUpdate: "CURRENT_TIMESTAMP(6)",
     }
   },
   relations: {
-    user: {
-      type: "many-to-one",
-      target: "User",
-      joinColumn: {
-        name: "user_id"
-      },
-      onDelete: "CASCADE"
-    },
     parent: {
       type: "many-to-one",
       target: "Folder",

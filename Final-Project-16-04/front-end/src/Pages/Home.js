@@ -2,9 +2,14 @@ import React, { useState, useEffect, useContext, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getAuthHeaders } from '../utils/auth';
 import { AuthContext } from "../App";
-import { FaFolder, FaFileAlt, FaPlus, FaUpload, FaThList, FaThLarge, FaEllipsisV, FaShareAlt } from 'react-icons/fa';
+import { FaFolder, FaFileAlt, FaPlus, FaUpload, FaThList, FaThLarge, FaEllipsisV, FaShareAlt, FaFileArchive, FaFilePdf, FaFileImage, FaFileVideo, FaFileWord, FaFileExcel, FaFile, FaStar, FaRegStar } from 'react-icons/fa';
 import { Menu, Transition } from '@headlessui/react';
 import ItemMenu from '../components/ItemMenu';
+import { Document as PDFDocument, Page as PDFPage, pdfjs } from 'react-pdf';
+import 'pdfjs-dist/web/pdf_viewer.css';
+
+// Set the workerSrc after all imports
+pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.js';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 const DOCUMENTS_ENDPOINT = `${API_BASE_URL}/documents`;
@@ -17,6 +22,27 @@ const TABS = [
   { id: 'shared', label: 'Shared' },
   { id: 'favorites', label: 'Favorites' },
 ];
+
+// Utility to extract plain text from Tiptap/ProseMirror JSON
+function extractPlainTextFromTiptap(doc) {
+  if (!doc) return '';
+  if (typeof doc === 'string') {
+    try { doc = JSON.parse(doc); } catch { return doc; }
+  }
+  let text = '';
+  function traverse(node) {
+    if (!node) return;
+    if (node.type === 'text' && node.text) {
+      text += node.text;
+    }
+    if (Array.isArray(node.content)) {
+      node.content.forEach(traverse);
+      text += '\n'; // Add newlines between paragraphs
+    }
+  }
+  traverse(doc);
+  return text.trim();
+}
 
 const Home = ({ teams: propTeams }) => {
   const navigate = useNavigate();
@@ -61,6 +87,24 @@ const Home = ({ teams: propTeams }) => {
 
   // Add state for openMenuId
   const [openMenuId, setOpenMenuId] = useState(null);
+
+  // PDF Preview Modal state
+  const [showPDFModal, setShowPDFModal] = useState(false);
+  const [pdfUrl, setPdfUrl] = useState("");
+
+  // Add state for image and video preview modals
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [imageUrl, setImageUrl] = useState("");
+  const [showVideoModal, setShowVideoModal] = useState(false);
+  const [videoUrl, setVideoUrl] = useState("");
+  // Search state
+  const [searchTerm, setSearchTerm] = useState("");
+
+  // Add state for extract modal
+  const [showExtractModal, setShowExtractModal] = useState(false);
+  const [extractTarget, setExtractTarget] = useState(null);
+  const [extractFolderName, setExtractFolderName] = useState("");
+  const [extractError, setExtractError] = useState("");
 
   // Use teams from prop or context
   const teams = propTeams || [];
@@ -249,18 +293,51 @@ const Home = ({ teams: propTeams }) => {
     if (activeTab === 'recent') {
       allRows = allRows.sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 10);
     }
+    // Filter by search term
+    if (searchTerm.trim()) {
+      const term = searchTerm.trim().toLowerCase();
+      allRows = allRows.filter(item => (item.name || '').toLowerCase().includes(term));
+    }
     return allRows;
   };
   const listData = getListData();
 
   // Actions
-  const handleRowClick = (item) => {
+  const handleRowClick = async (item) => {
     if (item.type === 'folder') {
       navigate(`/folders/${item.id}`);
     } else if (item.type === 'document') {
       navigate(`/documents/${item.id}`);
     } else if (item.type === 'file' && item.file_url) {
-      window.open(item.file_url, '_blank');
+      const ext = item.name?.split('.').pop()?.toLowerCase();
+      if (ext === 'pdf') {
+        if (!item.s3Key) {
+          console.error('Missing s3Key for item:', item);
+          alert('This file is missing a valid S3 key and cannot be previewed.');
+          return;
+        }
+        try {
+          // Fetch signed URL from backend
+          const res = await fetch(`${API_BASE_URL}/files/signed-url?key=${encodeURIComponent(item.s3Key)}`, { headers: getAuthHeaders() });
+          if (!res.ok) {
+            alert('Failed to get signed URL: ' + res.status);
+            return;
+          }
+          const data = await res.json();
+          setPdfUrl(data.url);
+          setShowPDFModal(true);
+        } catch (err) {
+          alert('Failed to load PDF for preview: ' + err);
+        }
+      } else if (["jpg","jpeg","png","gif","bmp","webp","svg"].includes(ext)) {
+        setImageUrl(item.file_url);
+        setShowImageModal(true);
+      } else if (["mp4","webm","ogg","mkv"].includes(ext)) {
+        setVideoUrl(item.file_url);
+        setShowVideoModal(true);
+      } else {
+        window.open(item.file_url, '_blank');
+      }
     }
   };
 
@@ -444,23 +521,41 @@ const Home = ({ teams: propTeams }) => {
       if (!res.ok) throw new Error('Failed to fetch');
       if (item.type === 'document') {
         const data = await res.json();
-        const blob = new Blob([JSON.stringify(data.document, null, 2)], { type: 'application/json' });
+        // Infer extension from name or default to .txt
+        let extension = '';
+        if (item.name && item.name.includes('.')) {
+          extension = item.name.substring(item.name.lastIndexOf('.'));
+        } else {
+          extension = '.txt';
+        }
+        const fileName = (item.name && item.name.includes('.')) ? item.name : (item.name || 'document') + extension;
+        // Extract plain text from Tiptap/ProseMirror JSON
+        const textContent = extractPlainTextFromTiptap(data.document.content) || JSON.stringify(data.document, null, 2);
+        // Set MIME type based on extension
+        let mimeType = 'text/plain';
+        if (extension === '.doc' || extension === '.docx') {
+          mimeType = 'application/msword';
+        } else if (extension === '.pdf') {
+          mimeType = 'application/pdf';
+        }
+        const blob = new Blob([textContent], { type: mimeType });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${item.name || 'document'}.json`;
+        a.download = fileName;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
       } else if (item.type === 'file') {
-        // Try to get file_url from API response or item
+        // Try to get file_url and file_name from API response or item
         const data = await res.json();
         const fileUrl = data.file?.file_url || item.file_url;
+        const fileName = data.file?.file_name || item.name || 'file';
         if (fileUrl) {
           const a = document.createElement('a');
           a.href = fileUrl;
-          a.download = item.name || 'file';
+          a.download = fileName;
           document.body.appendChild(a);
           a.click();
           document.body.removeChild(a);
@@ -474,15 +569,78 @@ const Home = ({ teams: propTeams }) => {
     }
   };
 
+  // Add extract handler
+  const handleExtract = (item) => {
+    if (!item || !item.id) return;
+    // Default folder name: archive name without extension
+    const baseName = item.name?.replace(/\.[^/.]+$/, "") || "Extracted";
+    setExtractTarget(item);
+    setExtractFolderName(baseName);
+    setExtractError("");
+    setShowExtractModal(true);
+  };
+
+  const confirmExtract = async () => {
+    if (!extractTarget || !extractTarget.id) return;
+    if (!extractFolderName.trim()) {
+      setExtractError("Folder name is required");
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE_URL}/files/${extractTarget.id}/extract`, {
+        method: 'POST',
+        headers: {
+          ...getAuthHeaders(),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ folder_name: extractFolderName.trim() })
+      });
+      if (!res.ok) throw new Error('Failed to extract');
+      const data = await res.json();
+      setShowExtractModal(false);
+      setExtractTarget(null);
+      setExtractFolderName("");
+      setExtractError("");
+      alert('Extracted! Files: ' + (data.files?.map(f => f.file).join(', ') || ''));
+      fetchData();
+    } catch (err) {
+      setExtractError('Extract failed: ' + err.message);
+    }
+  };
+
+  // Helper to get mono-color, type-specific icon
+  const getFileIcon = (item) => {
+    if (item.type === 'folder') return <FaFolder className="text-yellow-500 text-lg" />;
+    const ext = item.name?.split('.').pop()?.toLowerCase() || '';
+    if (['zip','rar'].includes(ext)) return <FaFileArchive className="text-purple-600 text-lg" />;
+    if (['pdf'].includes(ext)) return <FaFilePdf className="text-red-500 text-lg" />;
+    if (['jpg','jpeg','png','gif','bmp','webp','svg'].includes(ext)) return <FaFileImage className="text-blue-500 text-lg" />;
+    if (['mp4','webm','ogg','mkv'].includes(ext)) return <FaFileVideo className="text-pink-500 text-lg" />;
+    if (['doc','docx'].includes(ext)) return <FaFileWord className="text-blue-700 text-lg" />;
+    if (['xls','xlsx'].includes(ext)) return <FaFileExcel className="text-green-600 text-lg" />;
+    return <FaFile className="text-gray-500 text-lg" />;
+  };
+
   return (
     <div className="p-6">
+      {/* Search Bar */}
+      <div className="mb-4 flex items-center">
+        <input
+          type="text"
+          value={searchTerm}
+          onChange={e => setSearchTerm(e.target.value)}
+          placeholder="Search files, folders, or documents..."
+          className="w-full max-w-xs px-4 py-2 bg-white text-gray-900 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-500 shadow-sm"
+          style={{ minWidth: 220 }}
+        />
+      </div>
       {/* Tabs and actions */}
       <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-3">
           {TABS.map(tab => (
             <button
               key={tab.id}
-              className={`px-4 py-1.5 rounded-full font-medium text-sm transition-colors ${activeTab === tab.id ? 'bg-black text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+              className={activeTab === tab.id ? 'tab-clear-active' : 'tab-clear-inactive'}
               onClick={() => setActiveTab(tab.id)}
             >
               {tab.label}
@@ -490,36 +648,36 @@ const Home = ({ teams: propTeams }) => {
           ))}
           <div className="relative" ref={plusMenuRef}>
             <button
-              className="ml-2 px-3 py-1.5 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700 text-lg flex items-center"
+              className="ml-2 btn btn-secondary btn-lg text-lg flex items-center"
               onClick={() => setShowPlusMenu(v => !v)}
             >
-              <FaPlus />
+              <FaPlus className="text-[#0078d4]" />
             </button>
             {showPlusMenu && (
-              <div className="absolute left-0 mt-2 w-44 bg-white border border-gray-200 rounded shadow-lg z-10">
-                <button className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => handlePlusMenu('new-doc')}>New Document</button>
-                <button className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => handlePlusMenu('new-folder')}>New Folder</button>
-                <button className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => handlePlusMenu('upload')}>Upload File</button>
+              <div className="absolute left-0 mt-2 w-56 menu-panel">
+                <button className="menu-item" onClick={() => handlePlusMenu('new-doc')}><FaPlus className="menu-item-icon" />New Document</button>
+                <button className="menu-item" onClick={() => handlePlusMenu('new-folder')}><FaPlus className="menu-item-icon" />New Folder</button>
+                <button className="menu-item" onClick={() => handlePlusMenu('upload')}><FaUpload className="menu-item-icon" />Upload File</button>
               </div>
             )}
           </div>
         </div>
         <div className="flex items-center space-x-2">
-          <button className="p-2 rounded hover:bg-gray-100" title="Upload" onClick={() => navigate('/upload')}>
-            <FaUpload />
+          <button className="btn btn-primary btn-lg" title="Upload" onClick={() => navigate('/upload')}>
+            <FaUpload className="text-white" />
           </button>
-          <button className={`p-2 rounded hover:bg-gray-100 ${viewStyle === 'list' ? 'bg-gray-200' : ''}`} title="List view" onClick={() => setViewStyle('list')}>
-            <FaThList />
+          <button className={`btn btn-secondary btn-lg ${viewStyle === 'list' ? 'bg-[#e5f1fb] border-[#0078d4] text-[#0078d4]' : ''}`} title="List view" onClick={() => setViewStyle('list')}>
+            <FaThList className="text-[#0078d4]" />
           </button>
-          <button className={`p-2 rounded hover:bg-gray-100 ${viewStyle === 'grid' ? 'bg-gray-200' : ''}`} title="Grid view" onClick={() => setViewStyle('grid')}>
-            <FaThLarge />
+          <button className={`btn btn-secondary btn-lg ${viewStyle === 'grid' ? 'bg-[#e5f1fb] border-[#0078d4] text-[#0078d4]' : ''}`} title="Grid view" onClick={() => setViewStyle('grid')}>
+            <FaThLarge className="text-[#0078d4]" />
           </button>
         </div>
       </div>
 
       {/* Table/List or Grid */}
       {viewStyle === 'list' ? (
-        <div className="bg-white rounded-lg shadow border border-gray-100 overflow-x-auto">
+        <div className="bg-white rounded-lg shadow border border-gray-100 overflow-x-auto card">
           <table className="min-w-full text-sm">
             <thead>
               <tr className="text-gray-500 border-b">
@@ -550,9 +708,9 @@ const Home = ({ teams: propTeams }) => {
                     onDrop={item.type === 'folder' ? (e) => { e.stopPropagation(); handleDrop(item); } : undefined}
                   >
                     <td className="py-3 px-4">
-                      {item.type === 'folder' ? <FaFolder className="text-yellow-400 text-lg" /> : <FaFileAlt className="text-blue-400 text-lg" />}
+                      {getFileIcon(item)}
                     </td>
-                    <td className="py-3 px-4 font-medium">{item.name}</td>
+                    <td className="py-3 px-4 font-medium text-gray-900">{item.name}</td>
                     <td className="py-3 px-4">{item.date ? new Date(item.date).toLocaleDateString() : ''}</td>
                     <td className="py-3 px-4 text-gray-500">{item.status}</td>
                     <td className="py-3 px-4 text-right">
@@ -562,6 +720,7 @@ const Home = ({ teams: propTeams }) => {
                         onDownload={handleDownloadItem}
                         onInfo={handleShowInfo}
                         onDelete={handleDeleteItem}
+                        onExtract={handleExtract}
                         openMenuId={openMenuId}
                         setOpenMenuId={setOpenMenuId}
                       />
@@ -573,7 +732,7 @@ const Home = ({ teams: propTeams }) => {
           </table>
         </div>
       ) : (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 bg-white rounded-lg shadow border border-gray-100 p-6">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 bg-white rounded-lg shadow border border-gray-100 p-6 card">
           {isLoading ? (
             <div className="col-span-full text-center py-8">Loading...</div>
           ) : error ? (
@@ -593,9 +752,9 @@ const Home = ({ teams: propTeams }) => {
                 onDrop={item.type === 'folder' ? (e) => { e.stopPropagation(); handleDrop(item); } : undefined}
               >
                 <div className="mb-2">
-                  {item.type === 'folder' ? <FaFolder className="text-yellow-400 text-2xl" /> : <FaFileAlt className="text-blue-400 text-2xl" />}
+                  {getFileIcon(item)}
                 </div>
-                <div className="font-medium text-center truncate w-full" title={item.name}>{item.name}</div>
+                <div className="font-medium text-center truncate w-full text-gray-900" title={item.name}>{item.name}</div>
                 <div className="text-xs text-gray-500 mt-1">{item.date ? new Date(item.date).toLocaleDateString() : ''}</div>
                 <div className="text-xs text-gray-400 mt-1">{item.status}</div>
                 <div className="text-right">
@@ -605,6 +764,7 @@ const Home = ({ teams: propTeams }) => {
                     onDownload={handleDownloadItem}
                     onInfo={handleShowInfo}
                     onDelete={handleDeleteItem}
+                    onExtract={handleExtract}
                     openMenuId={openMenuId}
                     setOpenMenuId={setOpenMenuId}
                   />
@@ -619,19 +779,20 @@ const Home = ({ teams: propTeams }) => {
       {showFolderModal && (
         <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
           <div className="bg-white rounded p-6 w-96 shadow-lg">
-            <h2 className="text-lg font-medium mb-4">Create New Folder</h2>
+            <h2 className="text-lg font-medium mb-4 text-gray-900">Create New Folder</h2>
+            <label className="block text-sm font-medium mb-1 text-gray-700">Folder name</label>
             <input
               type="text"
               value={newFolderName}
               onChange={e => setNewFolderName(e.target.value)}
               placeholder="Folder name"
-              className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full px-3 py-2 bg-white text-gray-900 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-gray-500 shadow-sm"
               autoFocus
             />
             {folderError && <p className="text-sm text-red-600 mt-2">{folderError}</p>}
             <div className="flex justify-end space-x-3 mt-6">
-              <button onClick={() => { setShowFolderModal(false); setNewFolderName(""); setFolderError(""); }} className="px-4 py-2 text-sm text-gray-700 hover:text-gray-900">Cancel</button>
-              <button onClick={createNewFolder} className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">Create</button>
+              <button onClick={() => { setShowFolderModal(false); setNewFolderName(""); setFolderError(""); }} className="btn btn-secondary">Cancel</button>
+              <button onClick={createNewFolder} className="btn btn-primary">Create</button>
             </div>
           </div>
         </div>
@@ -641,19 +802,20 @@ const Home = ({ teams: propTeams }) => {
       {showDocModal && (
         <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
           <div className="bg-white rounded p-6 w-96 shadow-lg">
-            <h2 className="text-lg font-medium mb-4">Create New Document</h2>
+            <h2 className="text-lg font-medium mb-4 text-gray-900">Create New Document</h2>
+            <label className="block text-sm font-medium mb-1 text-gray-700">Document name</label>
             <input
               type="text"
               value={newDocName}
               onChange={e => setNewDocName(e.target.value)}
               placeholder="Document name"
-              className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full px-3 py-2 bg-white text-gray-900 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-gray-500 shadow-sm"
               autoFocus
             />
             {docError && <p className="text-sm text-red-600 mt-2">{docError}</p>}
             <div className="flex justify-end space-x-3 mt-6">
-              <button onClick={() => { setShowDocModal(false); setNewDocName(""); setDocError(""); }} className="px-4 py-2 text-sm text-gray-700 hover:text-gray-900">Cancel</button>
-              <button onClick={createNewDocument} className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">Create</button>
+              <button onClick={() => { setShowDocModal(false); setNewDocName(""); setDocError(""); }} className="btn btn-secondary">Cancel</button>
+              <button onClick={createNewDocument} className="btn btn-primary">Create</button>
             </div>
           </div>
         </div>
@@ -722,8 +884,128 @@ const Home = ({ teams: propTeams }) => {
           </div>
         </div>
       )}
+
+      {/* PDF Preview Modal */}
+      {showPDFModal && (
+        <PDFPreviewModal
+          fileUrl={pdfUrl}
+          onClose={() => setShowPDFModal(false)}
+        />
+      )}
+      {/* Extract Modal */}
+      {showExtractModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+          <div className="bg-white rounded p-6 w-96 shadow-lg">
+            <h2 className="text-lg font-medium mb-4 text-gray-900">Extract Archive</h2>
+            <div className="mb-4">
+              <label className="block text-sm font-medium mb-1 text-gray-700">Folder name</label>
+              <input
+                type="text"
+                value={extractFolderName}
+                onChange={e => setExtractFolderName(e.target.value)}
+                className="w-full px-3 py-2 bg-white text-gray-900 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-gray-500 shadow-sm"
+                autoFocus
+              />
+              {extractError && <p className="text-sm text-red-600 mt-2">{extractError}</p>}
+            </div>
+            <div className="flex justify-end space-x-3 mt-6">
+              <button onClick={() => { setShowExtractModal(false); setExtractTarget(null); setExtractFolderName(""); setExtractError(""); }} className="btn btn-secondary">Cancel</button>
+              <button onClick={confirmExtract} className="btn btn-primary">Extract</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showImageModal && (
+        <ImagePreviewModal fileUrl={imageUrl} onClose={() => setShowImageModal(false)} />
+      )}
+      {showVideoModal && (
+        <VideoPreviewModal fileUrl={videoUrl} onClose={() => setShowVideoModal(false)} />
+      )}
     </div>
   );
 };
+
+function PDFPreviewModal({ fileUrl, onClose, fileName }) {
+  const [numPages, setNumPages] = useState(null);
+  const [pageNumber, setPageNumber] = useState(1);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg shadow-lg p-4 relative max-w-3xl w-full flex flex-col items-center">
+        <button onClick={onClose} className="absolute top-2 right-2 p-2 bg-gray-200 rounded-full hover:bg-gray-300" title="Close">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+        </button>
+        <div className="flex justify-between items-center w-full mb-2">
+          <span className="text-gray-700 font-medium truncate">{fileName}</span>
+          <a href={fileUrl} download className="p-2 bg-blue-600 text-white rounded hover:bg-blue-700" title="Download">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V4" /></svg>
+          </a>
+        </div>
+        {error ? (
+          <div className="text-red-500">Failed to load PDF: {error}</div>
+        ) : (
+          <PDFDocument
+            file={fileUrl}
+            onLoadSuccess={({ numPages }) => { setNumPages(numPages); setLoading(false); }}
+            onLoadError={err => { setError(err.message); setLoading(false); }}
+            loading={<div className="text-center py-8">Loading PDF...</div>}
+          >
+            <PDFPage pageNumber={pageNumber} width={600} />
+          </PDFDocument>
+        )}
+        <div className="flex justify-between items-center mt-4 w-full">
+          <button onClick={() => setPageNumber(p => Math.max(1, p - 1))} disabled={pageNumber <= 1} className="px-3 py-1 bg-gray-100 rounded disabled:opacity-50">Prev</button>
+          <span>Page <input type="number" min={1} max={numPages || 1} value={pageNumber} onChange={e => setPageNumber(Number(e.target.value))} className="w-12 text-center border rounded mx-1" /> of {numPages}</span>
+          <button onClick={() => setPageNumber(p => Math.min(numPages, p + 1))} disabled={pageNumber >= numPages} className="px-3 py-1 bg-gray-100 rounded disabled:opacity-50">Next</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ImagePreviewModal({ fileUrl, onClose, fileName }) {
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg shadow-lg p-4 relative max-w-2xl w-full flex flex-col items-center">
+        <button onClick={onClose} className="absolute top-2 right-2 p-2 bg-gray-200 rounded-full hover:bg-gray-300" title="Close">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+        </button>
+        <div className="flex justify-between items-center w-full mb-2">
+          <span className="text-gray-700 font-medium truncate">{fileName}</span>
+          <a href={fileUrl} download className="p-2 bg-blue-600 text-white rounded hover:bg-blue-700" title="Download">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V4" /></svg>
+          </a>
+        </div>
+        <img src={fileUrl} alt="Preview" className="max-w-full max-h-[70vh] rounded shadow" style={{objectFit: 'contain'}} />
+      </div>
+    </div>
+  );
+}
+
+function VideoPreviewModal({ fileUrl, onClose, fileName }) {
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg shadow-lg p-4 relative max-w-4xl w-full flex flex-col items-center">
+        <button onClick={onClose} className="absolute top-2 right-2 p-2 bg-gray-200 rounded-full hover:bg-gray-300" title="Close">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+        </button>
+        <div className="flex justify-between items-center w-full mb-2">
+          <span className="text-gray-700 font-medium truncate">{fileName}</span>
+          <a href={fileUrl} download className="p-2 bg-blue-600 text-white rounded hover:bg-blue-700" title="Download">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V4" /></svg>
+          </a>
+        </div>
+        <video
+          src={fileUrl}
+          controls
+          playsInline
+          className="max-w-full max-h-[80vh] w-[720px] h-[405px] rounded bg-black"
+          style={{ objectFit: 'contain' }}
+        />
+      </div>
+    </div>
+  );
+}
 
 export default Home;

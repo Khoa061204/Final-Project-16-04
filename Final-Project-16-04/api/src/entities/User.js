@@ -6,8 +6,8 @@ module.exports = new EntitySchema({
   columns: {
     id: {
       primary: true,
-      type: "uuid",
-      generated: "uuid"
+      type: "int",
+      generated: true
     },
     username: {
       type: "varchar",
@@ -39,7 +39,7 @@ module.exports = new EntitySchema({
     },
     avatar_url: {
       type: "varchar",
-      length: 512,
+      length: 10000,
       nullable: true
     }
   },

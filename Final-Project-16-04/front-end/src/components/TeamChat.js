@@ -67,10 +67,10 @@ const TeamChat = ({ teams = [], user }) => {
           {teams.map(team => (
             <li
               key={team.id}
-              className={`flex items-center px-4 py-3 cursor-pointer hover:bg-indigo-100 transition-colors ${selectedTeam?.id === team.id ? 'bg-indigo-100 border-l-4 border-indigo-600' : ''}`}
+              className={`flex items-center px-4 py-3 cursor-pointer hover:bg-blue-50 transition-colors ${selectedTeam?.id === team.id ? 'bg-blue-50 border-l-4 border-blue-600' : ''}`}
               onClick={() => setSelectedTeam(team)}
             >
-              <span className="bg-indigo-200 text-indigo-700 rounded-full p-2 mr-3">
+              <span className="bg-blue-100 text-blue-700 rounded-full p-2 mr-3">
                 <MdGroup className="text-xl" />
               </span>
               <span className="font-medium text-gray-800 truncate">{team.name}</span>
@@ -84,7 +84,7 @@ const TeamChat = ({ teams = [], user }) => {
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-white">
           <div>
-            <h3 className="text-xl font-semibold text-indigo-700">{selectedTeam ? selectedTeam.name : 'Select a team'}</h3>
+            <h3 className="text-xl font-semibold text-blue-700">{selectedTeam ? selectedTeam.name : 'Select a team'}</h3>
             {selectedTeam && selectedTeam.members && (
               <div className="text-xs text-gray-500 mt-1">
                 {selectedTeam.members.map(m => m.name).join(', ')}
@@ -107,7 +107,7 @@ const TeamChat = ({ teams = [], user }) => {
                 const isMe = msg.userId === user.id;
                 return (
                   <div key={msg.id || idx} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[70%] px-4 py-2 rounded-lg shadow-sm ${isMe ? 'bg-indigo-600 text-white' : 'bg-white border border-gray-200 text-gray-800'}`}>
+                    <div className={`max-w-[70%] px-4 py-2 rounded-lg shadow-sm ${isMe ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-800'}`}>
                       <div className="text-xs font-semibold mb-1">
                         {isMe ? 'You' : msg.username || msg.name || msg.email}
                         <span className="ml-2 text-[10px] text-gray-400">{msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString() : ""}</span>
@@ -125,14 +125,14 @@ const TeamChat = ({ teams = [], user }) => {
         {selectedTeam && (
           <form onSubmit={sendMessage} className="flex items-center px-6 py-4 border-t border-gray-200 bg-white">
             <input
-              className="flex-1 border rounded-l-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              className="flex-1 border rounded-l-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="Type a message..."
               disabled={!selectedTeam}
             />
             <button
-              className="bg-indigo-600 text-white px-6 py-2 rounded-r-full font-semibold hover:bg-indigo-700 transition ml-2"
+              className="bg-blue-600 text-white px-6 py-2 rounded-r-full font-semibold hover:bg-blue-700 transition ml-2"
               type="submit"
               disabled={!selectedTeam || !input.trim()}
             >

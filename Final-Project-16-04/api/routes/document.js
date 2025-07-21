@@ -5,6 +5,7 @@ const jwt = require("jsonwebtoken");
 const { S3Client, PutObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
 const AppDataSource = require("../data-source");
 const Document = require("../src/entities/Document");
+const sharingSystem = require("../sharing-system");
 
 // Authentication middleware
 const authenticate = async (req, res, next) => {
@@ -138,15 +139,22 @@ router.get("/:id", authenticate, async (req, res) => {
     const document = await documentRepo.findOne({
       where: { id: req.params.id },
       select: [
-        "id", "title", "content", "s3Key", "userId", "createdAt", "updatedAt", "folder_id", "shared_with"
+        "id", "title", "content", "s3Key", "userId", "createdAt", "updatedAt", "folder_id"
       ]
     });
-    if (!document || (
-      document.userId !== req.user.id &&
-      !((document.shared_with || []).includes(req.user.id) || (document.shared_with || []).includes(req.user.email))
-    )) {
+    
+    if (!document) {
       return res.status(404).json({ message: "❌ Document not found" });
     }
+    
+    // Check if user owns the document or if it's shared with them
+    const isOwner = document.userId === req.user.id;
+    const isShared = sharingSystem.isItemSharedWith('document', req.params.id, req.user.id, req.user.email);
+    
+    if (!isOwner && !isShared) {
+      return res.status(404).json({ message: "❌ Document not found" });
+    }
+    
     res.json({ document });
   } catch (error) {
     console.error("❌ Get document error:", error);
@@ -164,15 +172,20 @@ router.put("/:id", authenticate, async (req, res) => {
     let document = await documentRepo.findOne({
       where: { id: req.params.id },
       select: [
-        "id", "title", "content", "s3Key", "userId", "createdAt", "updatedAt", "folder_id", "shared_with"
+        "id", "title", "content", "s3Key", "userId", "createdAt", "updatedAt", "folder_id"
       ]
     });
     
-    if (!document || (
-      document.userId !== req.user.id &&
-      !((document.shared_with || []).includes(req.user.id) || (document.shared_with || []).includes(req.user.email))
-    )) {
+    if (!document) {
       return res.status(404).json({ message: "❌ Document not found" });
+    }
+    
+    // Check if user owns the document or if it's shared with them
+    const isOwner = document.userId === req.user.id;
+    const isShared = sharingSystem.isItemSharedWith('document', req.params.id, req.user.id, req.user.email);
+    
+    if (!isOwner && !isShared) {
+      return res.status(403).json({ message: "❌ You don't have permission to edit this document" });
     }
     
     // Update S3 if content is provided

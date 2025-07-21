@@ -53,8 +53,30 @@ import Color from '@tiptap/extension-color';
 import { useContext } from 'react';
 import { AuthContext } from '../App';
 import CollaborationCursorOverlay from '../components/CollaborationCursorOverlay';
+import jsPDF from 'jspdf';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+
+// Helper to extract plain text from Tiptap/ProseMirror JSON
+function extractPlainTextFromTiptap(doc) {
+  if (!doc) return '';
+  if (typeof doc === 'string') {
+    try { doc = JSON.parse(doc); } catch { return doc; }
+  }
+  let text = '';
+  function traverse(node) {
+    if (!node) return;
+    if (node.type === 'text' && node.text) {
+      text += node.text;
+    }
+    if (Array.isArray(node.content)) {
+      node.content.forEach(traverse);
+      text += '\n'; // Add newlines between paragraphs
+    }
+  }
+  traverse(doc);
+  return text.trim();
+}
 
 const TextEditor = () => {
   const [title, setTitle] = useState('');
@@ -126,13 +148,19 @@ const TextEditor = () => {
             if (typeof content === 'string') {
               content = JSON.parse(content);
             }
-            // Defensive clean: strip 'attrs' from 'text' nodes
+            // Defensive clean: sanitize white color marks to dark, preserve others
             const cleanTextNodeAttrs = (node) => {
               if (!node) return node;
               if (Array.isArray(node)) return node.map(cleanTextNodeAttrs);
-              if (node.type === 'text' && node.attrs) {
-                const { attrs, ...rest } = node;
-                return rest;
+              if (node.type === 'text' && node.marks) {
+                // If any mark is color and is white, change to #111
+                const newMarks = node.marks.map(mark => {
+                  if (mark.type === 'textStyle' && mark.attrs && (mark.attrs.color === '#fff' || mark.attrs.color === '#ffffff' || mark.attrs.color === 'white')) {
+                    return { ...mark, attrs: { ...mark.attrs, color: '#111' } };
+                  }
+                  return mark;
+                });
+                return { ...node, marks: newMarks };
               }
               if (node.content) {
                 return { ...node, content: cleanTextNodeAttrs(node.content) };
@@ -361,6 +389,20 @@ const TextEditor = () => {
     };
   }, [id, user]); // Added user to dependency array
 
+  // Add this above the return statement in TextEditor
+  const handleExportPDF = () => {
+    if (!editor) return;
+    const doc = new jsPDF();
+    // Get plain text from Tiptap JSON
+    const plainText = extractPlainTextFromTiptap(editor.getJSON());
+    // Split text into lines to avoid overflow
+    const lines = doc.splitTextToSize(plainText, 180);
+    doc.text(lines, 10, 10);
+    // Remove any extension from title before adding .pdf
+    let baseName = (title || 'document').replace(/\.[^/.]+$/, '');
+    doc.save(`${baseName}.pdf`);
+  };
+
   if (!editor) {
     return (
       <div className="flex h-screen">
@@ -374,14 +416,17 @@ const TextEditor = () => {
     );
   }
 
-  const MenuButton = ({ onClick, active, children }) => (
+  const MenuButton = ({ onClick, active, children, ...props }) => (
     <button
       onClick={onClick}
       className={`p-2 mx-1 rounded transition-colors ${
         active ? 'bg-gray-200' : 'hover:bg-gray-100'
       }`}
+      {...props}
     >
-      {children}
+      {React.isValidElement(children)
+        ? React.cloneElement(children, { className: (children.props.className || '') + ' text-gray-900' })
+        : children}
     </button>
   );
 
@@ -547,21 +592,21 @@ const TextEditor = () => {
                   active={editor.isActive('heading', { level: 1 })}
                   title="Heading 1"
                 >
-                  H1
+                  <span className="text-gray-900">H1</span>
                 </MenuButton>
                 <MenuButton
                   onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
                   active={editor.isActive('heading', { level: 2 })}
                   title="Heading 2"
                 >
-                  H2
+                  <span className="text-gray-900">H2</span>
                 </MenuButton>
                 <MenuButton
                   onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
                   active={editor.isActive('heading', { level: 3 })}
                   title="Heading 3"
                 >
-                  H3
+                  <span className="text-gray-900">H3</span>
                 </MenuButton>
             <MenuButton
               onClick={() => editor.chain().focus().toggleBlockquote().run()}
@@ -647,6 +692,17 @@ const TextEditor = () => {
                   Save
                 </button>
               </div>
+
+              {/* PDF Export Button */}
+              <div className="flex items-center ml-2">
+                <button
+                  onClick={handleExportPDF}
+                  className="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 ml-2"
+                  title="Export as PDF"
+                >
+                  Export as PDF
+                </button>
+              </div>
           </div>
 
           {/* Editor */}
@@ -655,7 +711,7 @@ const TextEditor = () => {
             {error ? (
               <div className="text-red-500">{error}</div>
             ) : (
-              <EditorContent editor={editor} className="prose max-w-none" />
+              <EditorContent editor={editor} className="prose max-w-none" style={{ color: '#111' }} />
             )}
                 {/* Page Number */}
                 <div style={{

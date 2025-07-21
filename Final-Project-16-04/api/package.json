@@ -11,6 +11,10 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.787.0",
+    "@aws-sdk/s3-request-presigner": "^3.842.0",
+    "@hocuspocus/extension-logger": "^3.2.0",
+    "@hocuspocus/extension-sqlite": "^3.2.0",
+    "@hocuspocus/server": "^3.2.0",
     "aws-sdk": "^2.1692.0",
     "axios": "^1.8.1",
     "bcryptjs": "^3.0.2",
@@ -24,16 +28,18 @@
     "http-errors": "~1.6.3",
     "jade": "~1.11.0",
     "jsonwebtoken": "^9.0.2",
+    "jspdf": "^3.0.1",
     "morgan": "~1.9.1",
     "multer": "^1.4.5-lts.2",
     "multer-s3": "^3.0.1",
     "mysql2": "^3.14.1",
     "nodemailer": "^6.10.1",
     "pdf-parse": "^1.1.1",
-    "react-router-dom": "^7.2.0",
+    "pdfjs-dist": "^5.3.31",
     "reflect-metadata": "^0.2.2",
     "socket.io": "^4.8.1",
-    "typeorm": "^0.3.21"
+    "typeorm": "^0.3.21",
+    "y-websocket": "^3.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.17",

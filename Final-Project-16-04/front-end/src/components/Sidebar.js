@@ -13,23 +13,24 @@ import {
   MdLogout, 
   MdMenu,
   MdPerson,
-  MdClose,
-  MdCheck
+  MdChevronLeft,
+  MdCheck,
+  MdAssignmentTurnedIn
 } from 'react-icons/md';
 import Profile from './Profile';
 import TeamChat from "./TeamChat";
 
 const NavItem = ({ icon: Icon, label, onClick, badge, isActive }) => (
   <li
-    className={`rounded-lg px-3 py-2.5 flex items-center cursor-pointer transition-all duration-200 ${
+    className={`rounded-md px-3 py-2.5 flex items-center cursor-pointer transition-all duration-200 font-medium ${
       isActive 
-        ? 'bg-primary text-white' 
-        : 'text-gray-700 hover:bg-gray-100'
+        ? 'bg-[#0078d4] text-white' 
+        : 'text-gray-700 hover:bg-blue-50'
     }`}
     onClick={onClick}
   >
-    <Icon className={`text-xl ${isActive ? 'text-white' : 'text-gray-500'}`} />
-    <span className={`ml-3 font-medium ${isActive ? 'text-white' : 'text-gray-700'}`}>{label}</span>
+    <Icon className={`text-xl ${isActive ? 'text-white' : 'text-gray-400 group-hover:text-[#0078d4]'}`} />
+    <span className={`ml-3 ${isActive ? 'text-white' : 'text-gray-700'}`}>{label}</span>
     {badge > 0 && (
       <span className="ml-auto bg-red-500 text-white text-xs rounded-full px-2 py-0.5 font-medium">
         {badge}
@@ -44,6 +45,7 @@ const Sidebar = ({ onClose, teams = [] }) => {
   const { setIsAuthenticated, setUser, setRememberMe, user } = useContext(AuthContext);
   const [showProfile, setShowProfile] = useState(false);
   const [pendingInvites, setPendingInvites] = useState(0);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
 
   useEffect(() => {
     const fetchInvites = async () => {
@@ -67,6 +69,62 @@ const Sidebar = ({ onClose, teams = [] }) => {
     fetchInvites();
   }, [user]);
 
+  useEffect(() => {
+    const fetchNotifications = async () => {
+      if (!user) return;
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/notifications`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          const unread = data.notifications ? data.notifications.filter(n => !n.isRead).length : 0;
+          setUnreadNotifications(unread);
+        }
+      } catch (err) {
+        setUnreadNotifications(0);
+      }
+    };
+    fetchNotifications();
+  }, [user]);
+
+  // Connect to Socket.IO for real-time notifications
+  useEffect(() => {
+    if (!user) return;
+
+    // Import socket.io-client dynamically
+    const connectToSocket = async () => {
+      try {
+        const { io } = await import('socket.io-client');
+        const socket = io(process.env.REACT_APP_API_URL || 'http://localhost:5000', {
+          auth: {
+            token: localStorage.getItem('token')
+          }
+        });
+
+        // Join user-specific room for notifications
+        socket.emit('join-user-room', user.id);
+
+        // Listen for new notifications
+        socket.on('new-notification', (notification) => {
+          setUnreadNotifications(prev => prev + 1);
+        });
+
+        return () => {
+          socket.disconnect();
+        };
+      } catch (error) {
+        console.error('Error connecting to socket:', error);
+      }
+    };
+
+    connectToSocket();
+  }, [user]);
+
   const onLogout = () => {
     setIsAuthenticated(false);
     setUser(null);
@@ -81,22 +139,14 @@ const Sidebar = ({ onClose, teams = [] }) => {
   };
 
   return (
-    <div className="h-full bg-white border-r border-gray-200 w-64 flex flex-col">
-      {/* Mobile close button */}
-      <button
-        onClick={onClose}
-        className="lg:hidden absolute top-4 right-4 p-2 rounded-md hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary/50"
-      >
-        <MdClose className="h-5 w-5 text-gray-500" />
-      </button>
-
+    <div className="h-full bg-white w-64 flex flex-col font-sans text-gray-900 shadow-xl transition-transform duration-300" style={{fontFamily: 'Segoe UI, sans-serif'}}>
       {/* Profile section */}
       <div className="p-4 border-b border-gray-200">
         <div 
           className="flex items-center space-x-3 p-2 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors duration-200"
           onClick={() => setShowProfile(true)}
         >
-          <div className="w-10 h-10 bg-primary rounded-full flex items-center justify-center overflow-hidden">
+          <div className="w-10 h-10 bg-[#0078d4] bg-opacity-90 rounded-full flex items-center justify-center overflow-hidden">
             {user?.avatar_url ? (
               <img src={user.avatar_url} alt="avatar" className="w-full h-full object-cover" />
             ) : (
@@ -152,6 +202,7 @@ const Sidebar = ({ onClose, teams = [] }) => {
             icon={MdNotifications}
             label="Notifications"
             onClick={() => navigateTo('/notifications')}
+            badge={unreadNotifications}
             isActive={location.pathname === '/notifications'}
           />
         </ul>

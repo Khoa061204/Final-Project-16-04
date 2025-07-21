@@ -20,7 +20,11 @@ const ALLOWED_EXTENSIONS = [
   // PDF files
   '.pdf',
   // Image files
-  '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg'
+  '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg',
+  // Video files
+  '.mp4', '.webm', '.ogg', '.mkv',
+  // Archive files
+  '.zip', '.rar'
 ];
 
 function UploadFile() {
@@ -68,6 +72,7 @@ function UploadFile() {
       let type = 'text';
       if (extension === '.pdf') type = 'binary';
       if (['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg'].includes(extension)) type = 'image';
+      if (['.mp4', '.webm', '.ogg', '.mkv'].includes(extension)) type = 'video';
       setFile(selectedFile);
       setFileType(type);
       setMessage("");
@@ -90,6 +95,7 @@ function UploadFile() {
       let type = 'text';
       if (extension === '.pdf') type = 'binary';
       if (['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg'].includes(extension)) type = 'image';
+      if (['.mp4', '.webm', '.ogg', '.mkv'].includes(extension)) type = 'video';
       setFile(droppedFile);
       setFileType(type);
       setMessage("");
@@ -114,78 +120,27 @@ function UploadFile() {
     }
 
     setLoading(true);
-    setMessage("Reading file...");
+    setMessage("Uploading file...");
     setProgress(10);
 
     try {
-      let fileContent;
-      let body;
-
-      if (fileType === 'binary') {
-        // Handle PDF files
-        fileContent = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = e => resolve(e.target.result);
-          reader.onerror = reject;
-          reader.readAsDataURL(file); // Read as base64
-        });
-        body = {
-          title: file.name,
-          type: 'pdf',
-          pdfUrl: fileContent
-        };
-      } else if (fileType === 'image') {
-        // Handle image files
-        fileContent = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = e => resolve(e.target.result);
-          reader.onerror = reject;
-          reader.readAsDataURL(file); // Read as base64
-        });
-        body = {
-          title: file.name,
-          type: 'image',
-          imageUrl: fileContent
-        };
-      } else {
-        // Handle text files - always use Tiptap-compatible JSON
-        fileContent = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = e => resolve(e.target.result);
-          reader.onerror = reject;
-          reader.readAsText(file);
-        });
-        body = {
-          title: file.name,
-          type: 'text',
-          content: {
-            type: 'doc',
-            content: [
-              {
-                type: 'paragraph',
-                content: fileContent
-                  ? [{ type: 'text', text: fileContent }]
-                  : [],
-              },
-            ],
-          },
-        };
-      }
-
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('title', file.name);
       if (selectedFolder) {
-        body.folder_id = selectedFolder;
+        formData.append('folder_id', selectedFolder);
       }
 
       setProgress(40);
-      setMessage("Uploading document...");
+      setMessage("Uploading file...");
 
-      const response = await fetch(`${API_BASE_URL}/documents`, {
+      const response = await fetch(`${API_BASE_URL}/upload`, {
         method: "POST",
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'Content-Type': 'application/json'
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          // Do NOT set Content-Type for FormData
         },
-        body: JSON.stringify(body)
+        body: formData,
       });
 
       if (!response.ok) {
@@ -195,17 +150,11 @@ function UploadFile() {
 
       setProgress(80);
       const data = await response.json();
-      
       setProgress(100);
-      setMessage("✅ Document uploaded successfully!");
-      setFile(null);
-      setTimeout(() => setProgress(0), 1000);
-      // Redirect to Home after short delay
+      setMessage("✅ File uploaded successfully!");
       setTimeout(() => navigate('/'), 1200);
-    } catch (error) {
-      console.error('Upload error:', error);
-      setMessage(`❌ Upload failed: ${error.message || 'Network error. Please try again.'}`);
-      setProgress(0);
+    } catch (err) {
+      setMessage("❌ Upload failed: " + err.message);
     } finally {
       setLoading(false);
     }
@@ -296,7 +245,7 @@ function UploadFile() {
                     <p className="pl-1">or drag and drop</p>
                   </div>
                   <p className="text-xs text-gray-500">
-                    Supported files: Text, Code, Web, Data, Config, Shell scripts, and PDFs
+                    Supported files: Text, Code, Web, Data, Config, Shell scripts, PDFs, ZIP, and RAR archives
                   </p>
                 </div>
 

@@ -22,6 +22,11 @@ module.exports = new EntitySchema({
       type: "text",
       nullable: false,
     },
+    s3Key: {
+      type: "varchar",
+      length: 512,
+      nullable: true,
+    },
     uploaded_at: {
       type: "timestamp",
       precision: 6,
@@ -29,15 +34,9 @@ module.exports = new EntitySchema({
       default: () => "CURRENT_TIMESTAMP(6)",
     },
     folder_id: {
-      type: "char",
-      length: 36,
+      type: "int",
       nullable: true,
-    },
-    shared_with: {
-      type: "simple-json",
-      nullable: true,
-      default: '[]'
-    },
+    }
   },
   relations: {
     user: {

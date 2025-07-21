@@ -418,10 +418,10 @@ const ProjectDetailPage = () => {
                   <h3 className="text-lg font-bold text-gray-700 tracking-wide">To Do</h3>
                 </div>
                 <div className="flex-1 overflow-y-auto p-4 space-y-6">
-                  {tasks.filter(t => t.status === 'To Do' && !t.assignedUserId).length === 0 ? (
+                  {tasks.filter(t => !t.assignedUserId).length === 0 ? (
                     <div className="text-center text-gray-300 italic py-12">No open tasks</div>
                   ) : (
-                    tasks.filter(t => t.status === 'To Do' && !t.assignedUserId).map(task => (
+                    tasks.filter(t => !t.assignedUserId).map(task => (
                       <div key={task.id} className="bg-white rounded-xl shadow-lg p-5 flex flex-col gap-2 border border-gray-200 hover:shadow-2xl transition-shadow duration-200 group">
                         <div className="flex justify-between items-start">
                           <div className="flex-1">
@@ -452,10 +452,10 @@ const ProjectDetailPage = () => {
                   <h3 className="text-lg font-bold text-blue-700 tracking-wide">In Progress</h3>
                 </div>
                 <div className="flex-1 overflow-y-auto p-4 space-y-6">
-                  {tasks.filter(t => t.status === 'In Progress').length === 0 ? (
+                  {tasks.filter(t => t.assignedUserId && t.status !== 'Done').length === 0 ? (
                     <div className="text-center text-blue-200 italic py-12">No tasks in progress</div>
                   ) : (
-                    tasks.filter(t => t.status === 'In Progress').map(task => (
+                    tasks.filter(t => t.assignedUserId && t.status !== 'Done').map(task => (
                       <div key={task.id} className="bg-white rounded-xl shadow-lg p-5 flex flex-col gap-2 border border-blue-200 hover:shadow-2xl transition-shadow duration-200 group">
                         <div className="flex justify-between items-start">
                           <div className="flex-1">

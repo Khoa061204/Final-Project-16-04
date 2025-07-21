@@ -11,6 +11,7 @@ const Profile = ({ onClose }) => {
   const [editedEmail, setEditedEmail] = useState(user?.email || '');
   const [avatarPreview, setAvatarPreview] = useState(user?.avatar_url || null);
   const [avatarFile, setAvatarFile] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
 
   const handleLogout = () => {
     setIsAuthenticated(false);
@@ -22,7 +23,14 @@ const Profile = ({ onClose }) => {
 
   const handleSaveProfile = async () => {
     try {
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/users/profile`, {
+      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+      const userId = user?.id;
+      
+      console.log('API URL:', apiUrl);
+      console.log('User ID:', userId);
+      console.log('Full URL:', `${apiUrl}/users/${userId}`);
+      
+      const response = await fetch(`${apiUrl}/users/${userId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -34,12 +42,17 @@ const Profile = ({ onClose }) => {
         })
       });
 
+      console.log('Response status:', response.status);
+      
       if (response.ok) {
         const updatedUser = await response.json();
-        setUser(updatedUser);
+        console.log('Updated user data:', updatedUser);
+        setUser(updatedUser.user);
         setIsEditing(false);
       } else {
-        throw new Error('Failed to update profile');
+        const errorData = await response.text();
+        console.error('Error response:', errorData);
+        throw new Error(`Failed to update profile: ${response.status}`);
       }
     } catch (error) {
       console.error('Error updating profile:', error);
@@ -52,31 +65,60 @@ const Profile = ({ onClose }) => {
     if (file) {
       setAvatarFile(file);
       setAvatarPreview(URL.createObjectURL(file));
+      // Automatically upload the avatar when a file is selected
+      handleUploadAvatar(file);
     }
   };
 
-  const handleUploadAvatar = async () => {
-    if (!avatarFile) return;
+  const handleUploadAvatar = async (file = avatarFile) => {
+    if (!file || isUploading) return;
+    
+    console.log('Starting avatar upload for file:', file.name);
+    console.log('Current user:', user);
+    console.log('User ID type:', typeof user?.id);
+    setIsUploading(true);
+    
     const formData = new FormData();
-    formData.append('avatar', avatarFile);
+    formData.append('avatar', file);
+    
     try {
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/users/${user.id}/avatar`, {
+      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+      const uploadUrl = `${apiUrl}/users/${user.id}/avatar`;
+      
+      console.log('Uploading to:', uploadUrl);
+      console.log('User ID:', user.id);
+      console.log('Token exists:', !!localStorage.getItem('token'));
+      
+      const response = await fetch(uploadUrl, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         },
         body: formData
       });
+      
+      console.log('Response status:', response.status);
+      console.log('Response headers:', response.headers);
+      
       const data = await response.json();
+      console.log('Response data:', data);
+      
       if (response.ok) {
-        setUser({ ...user, avatar_url: data.avatar_url });
+        // Update the user state with the new avatar URL
+        const updatedUser = { ...user, avatar_url: data.avatar_url };
+        setUser(updatedUser);
         setAvatarFile(null);
         setAvatarPreview(data.avatar_url);
+        console.log('Avatar uploaded successfully:', data.avatar_url);
+        alert('Avatar uploaded successfully!');
       } else {
-        throw new Error(data.message || 'Failed to upload avatar');
+        throw new Error(data.message || `Failed to upload avatar: ${response.status}`);
       }
     } catch (error) {
-      alert(error.message);
+      console.error('Error uploading avatar:', error);
+      alert('Failed to upload avatar: ' + error.message);
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -103,9 +145,15 @@ const Profile = ({ onClose }) => {
               <FiUser className="w-8 h-8 text-white" />
             )}
             {isEditing && (
-              <label className="absolute bottom-0 right-0 bg-white rounded-full p-1 cursor-pointer shadow">
+              <label className={`absolute bottom-0 right-0 bg-white rounded-full p-1 cursor-pointer shadow ${isUploading ? 'opacity-50 cursor-not-allowed' : ''}`}>
                 <FiCamera className="w-4 h-4 text-indigo-600" />
-                <input type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} />
+                <input 
+                  type="file" 
+                  accept="image/*" 
+                  className="hidden" 
+                  onChange={handleAvatarChange}
+                  disabled={isUploading}
+                />
               </label>
             )}
           </div>
@@ -127,15 +175,13 @@ const Profile = ({ onClose }) => {
 
         {isEditing && avatarFile && (
           <div className="flex items-center space-x-2 mt-2">
-            <button
-              onClick={handleUploadAvatar}
-              className="px-3 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700 text-xs"
-            >
-              Upload Avatar
-            </button>
+            <span className="text-sm text-gray-500">
+              {isUploading ? 'Uploading avatar...' : 'Avatar selected'}
+            </span>
             <button
               onClick={() => { setAvatarFile(null); setAvatarPreview(user?.avatar_url || null); }}
               className="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50 text-xs"
+              disabled={isUploading}
             >
               Cancel
             </button>
