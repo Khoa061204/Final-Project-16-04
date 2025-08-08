@@ -1,365 +1,391 @@
-# Giggle Drive - Collaborative Cloud Storage & Project Management Platform
+# 🚀 CloudSync - Enterprise File Management & Collaboration Platform
 
-A comprehensive web application that combines cloud storage, collaborative document editing, team management, and project management features. Built with React, Node.js, TypeORM, and MySQL.
+A comprehensive cloud-based file management and team collaboration platform built with modern web technologies.
 
-## 🚀 Features
+## 📋 Table of Contents
 
-### 🔐 Authentication & User Management
-- User registration and login with JWT authentication
-- Password reset functionality with email integration
-- User profile management with avatar upload
-- Remember me functionality
-- Secure token-based authentication
+- [Overview](#overview)
+- [Architecture](#architecture)
+- [Features](#features)
+- [Technology Stack](#technology-stack)
+- [Project Structure](#project-structure)
+- [Getting Started](#getting-started)
+- [Development](#development)
+- [Testing](#testing)
+- [Deployment](#deployment)
+- [API Documentation](#api-documentation)
+- [Contributing](#contributing)
 
-### ☁️ Cloud Storage
-- File upload and management with AWS S3 integration
-- Support for text/code files with syntax highlighting
-- Folder organization with nested folder structure
-- File sharing capabilities
-- File deletion and organization
+## 🎯 Overview
 
-### 📄 Collaborative Document Editing
-- Real-time collaborative text editing using TipTap
-- Multiple users can edit documents simultaneously
-- Live cursor tracking for collaborative users
-- Document versioning and auto-save
-- Rich text formatting options
+CloudSync is an enterprise-grade file management and collaboration platform that enables teams to:
 
-### 👥 Team Management
-- Create and manage teams
-- Invite team members via email
-- Team member roles and permissions
-- Team chat functionality with real-time messaging
-- Team invitation system with accept/reject functionality
+- **Store & Organize**: Secure cloud storage with hierarchical folder structure
+- **Collaborate**: Real-time team collaboration with shared workspaces
+- **Manage Projects**: Integrated project management with task tracking
+- **Share Securely**: Granular permission controls and secure file sharing
+- **Stay Connected**: Real-time notifications and team communication
 
-### 📋 Project Management
-- Create and manage projects within teams
-- Task creation and assignment
-- Task status tracking (To Do, In Progress, Done)
-- Task priority levels (Low, Medium, High)
-- Due date management with overdue notifications
-- Project progress tracking with visual indicators
-- My Tasks view for personal task management
+## 🏗️ Architecture
 
-### 🎨 Modern UI/UX
-- Responsive design with Tailwind CSS
-- Modern card-based layout
-- Interactive modals and forms
-- Loading states and error handling
-- Smooth animations and transitions
-- Mobile-friendly interface
+```
+CloudSync/
+├── backend/                 # Backend API Server
+│   ├── src/
+│   │   ├── controllers/     # Business logic controllers
+│   │   ├── services/        # Core business services
+│   │   ├── models/          # Data models and entities
+│   │   ├── middleware/      # Custom middleware
+│   │   ├── routes/          # API route definitions
+│   │   ├── utils/           # Utility functions
+│   │   └── config/          # Configuration files
+│   ├── tests/               # Test suites
+│   └── docs/                # API documentation
+├── frontend/                # React Frontend Application
+│   ├── src/
+│   │   ├── components/      # Reusable UI components
+│   │   ├── pages/           # Page components
+│   │   ├── services/        # API service layer
+│   │   ├── hooks/           # Custom React hooks
+│   │   ├── contexts/        # React contexts
+│   │   └── utils/           # Frontend utilities
+│   └── public/              # Static assets
+├── websocket-service/       # Real-time communication service
+└── docs/                    # Project documentation
+```
+
+## ✨ Features
+
+### 🔐 Authentication & Security
+- JWT-based authentication
+- Role-based access control
+- Secure file encryption
+- Session management
+
+### 📁 File Management
+- Hierarchical folder structure
+- Drag & drop file upload
+- Document editor with rich text formatting
+- File versioning and history
+- Bulk operations
+
+### 👥 Team Collaboration
+- Team creation and management
+- Member invitations and permissions
+- Real-time team chat
+- Shared workspaces
+- Activity tracking
+
+### 📊 Project Management
+- Project creation and organization
+- Task assignment and tracking
+- Progress monitoring
+- Deadline management
+- Team workload distribution
+
+### 🔄 File Sharing
+- Granular permission controls
+- Public and private sharing
+- Link-based sharing
+- Access tracking and analytics
+
+### 🔔 Notifications
+- Real-time notifications
+- Email notifications
+- Custom notification preferences
+- Activity feeds
+
+### 📅 Calendar Integration
+- Project deadline tracking
+- Task due date management
+- Event scheduling
+- Calendar synchronization
 
 ## 🛠️ Technology Stack
 
-### Frontend
-- **React 18** - Modern React with hooks
-- **React Router** - Client-side routing
-- **Tailwind CSS** - Utility-first CSS framework
-- **React Icons** - Icon library
-- **TipTap** - Rich text editor
-- **Socket.IO Client** - Real-time communication
-- **Axios** - HTTP client
-
 ### Backend
-- **Node.js** - JavaScript runtime
-- **Express.js** - Web framework
-- **TypeORM** - Object-Relational Mapping
-- **MySQL** - Database
-- **JWT** - Authentication
-- **Socket.IO** - Real-time communication
-- **AWS SDK** - S3 integration
-- **Multer** - File upload handling
-- **Nodemailer** - Email functionality
-- **bcryptjs** - Password hashing
+- **Runtime**: Node.js
+- **Framework**: Express.js
+- **Database**: MySQL with TypeORM
+- **Authentication**: JWT
+- **File Storage**: AWS S3
+- **Real-time**: Socket.IO
+- **Testing**: Jest + Supertest
+
+### Frontend
+- **Framework**: React 18
+- **Styling**: Tailwind CSS
+- **State Management**: React Context + Hooks
+- **Text Editor**: TipTap
+- **Real-time**: Socket.IO Client
+- **Build Tool**: Vite
 
 ### Infrastructure
-- **AWS S3** - File storage
-- **MySQL Database** - Data persistence
+- **Database**: MySQL
+- **File Storage**: AWS S3
+- **Caching**: Redis (optional)
+- **Monitoring**: Application logging
 
 ## 📁 Project Structure
 
+### Backend Structure
 ```
-├── api/                          # Backend API server
-│   ├── src/
-│   │   └── entities/             # TypeORM entities
-│   │       ├── User.js
-│   │       ├── Document.js
-│   │       ├── File.js
-│   │       ├── Folder.js
-│   │       ├── Team.js
-│   │       ├── Project.js
-│   │       ├── Task.js
-│   │       ├── Message.js
-│   │       └── Invitation.js
-│   ├── routes/                   # API routes
-│   ├── middleware/               # Express middleware
-│   ├── utils/                    # Utility functions
-│   ├── server.js                 # Main server file
-│   ├── data-source.js            # Database configuration
-│   └── package.json
-├── front-end/                    # React frontend
-│   ├── src/
-│   │   ├── Pages/                # Page components
-│   │   │   ├── Home.js
-│   │   │   ├── Login.js
-│   │   │   ├── Register.js
-│   │   │   ├── ProjectsPage.js
-│   │   │   ├── ProjectDetailPage.js
-│   │   │   ├── MyTasksPage.js
-│   │   │   ├── Teams.js
-│   │   │   ├── TextEditor.js
-│   │   │   └── UploadFile.js
-│   │   ├── components/           # Reusable components
-│   │   │   ├── Sidebar.js
-│   │   │   ├── MainLayout.js
-│   │   │   ├── TeamChat.js
-│   │   │   └── Profile.js
-│   │   ├── utils/                # Utility functions
-│   │   ├── App.js                # Main app component
-│   │   └── index.js
-│   └── package.json
-├── websocket-server/             # WebSocket server (optional)
-└── README.md
+backend/
+├── src/
+│   ├── controllers/         # Business logic controllers
+│   │   ├── AuthController.js
+│   │   ├── FileController.js
+│   │   ├── TeamController.js
+│   │   ├── ProjectController.js
+│   │   ├── NotificationController.js
+│   │   └── CalendarController.js
+│   ├── services/            # Core business services
+│   │   ├── AuthService.js
+│   │   ├── FileService.js
+│   │   ├── TeamService.js
+│   │   ├── ProjectService.js
+│   │   ├── NotificationService.js
+│   │   └── CalendarService.js
+│   ├── models/              # Data models
+│   │   ├── User.js
+│   │   ├── File.js
+│   │   ├── Folder.js
+│   │   ├── Team.js
+│   │   ├── Project.js
+│   │   └── Notification.js
+│   ├── middleware/          # Custom middleware
+│   │   ├── auth.js
+│   │   ├── validation.js
+│   │   └── errorHandler.js
+│   ├── routes/              # API routes
+│   │   ├── auth.js
+│   │   ├── files.js
+│   │   ├── teams.js
+│   │   ├── projects.js
+│   │   └── notifications.js
+│   ├── utils/               # Utility functions
+│   │   ├── database.js
+│   │   ├── fileUpload.js
+│   │   └── validation.js
+│   └── config/              # Configuration
+│       ├── database.js
+│       └── app.js
+├── tests/                   # Test suites
+│   ├── unit/
+│   ├── integration/
+│   └── e2e/
+└── docs/                    # API documentation
+```
+
+### Frontend Structure
+```
+frontend/
+├── src/
+│   ├── components/          # Reusable components
+│   │   ├── common/          # Common UI components
+│   │   ├── forms/           # Form components
+│   │   ├── layout/          # Layout components
+│   │   └── features/        # Feature-specific components
+│   ├── pages/               # Page components
+│   │   ├── auth/
+│   │   ├── dashboard/
+│   │   ├── files/
+│   │   ├── teams/
+│   │   ├── projects/
+│   │   └── settings/
+│   ├── services/            # API services
+│   │   ├── api.js
+│   │   ├── authService.js
+│   │   ├── fileService.js
+│   │   └── teamService.js
+│   ├── hooks/               # Custom hooks
+│   │   ├── useAuth.js
+│   │   ├── useFiles.js
+│   │   └── useTeams.js
+│   ├── contexts/            # React contexts
+│   │   ├── AuthContext.js
+│   │   └── ThemeContext.js
+│   └── utils/               # Utility functions
+│       ├── constants.js
+│       ├── helpers.js
+│       └── validation.js
+└── public/                  # Static assets
 ```
 
 ## 🚀 Getting Started
 
 ### Prerequisites
-- Node.js (v16 or higher)
-- MySQL (v8.0 or higher)
-- AWS S3 bucket (for file storage)
-- Email service (for password reset)
-
-### Environment Variables
-
-Create `.env` files in both `api/` and `front-end/` directories:
-
-#### Backend (.env in api/ directory)
-```env
-# Database
-DB_HOST=localhost
-DB_PORT=3306
-DB_USER=your_mysql_user
-DB_PASS=your_mysql_password
-DB_NAME=your_database_name
-
-# JWT
-JWT_SECRET=your_jwt_secret_key
-
-# AWS S3
-AWS_REGION=your_aws_region
-REACT_APP_AWS_BUCKET_NAME=your_s3_bucket_name
-REACT_APP_AWS_ACCESS_KEY_ID=your_aws_access_key
-REACT_APP_AWS_SECRET_ACCESS_KEY=your_aws_secret_key
-
-# Email (for password reset)
-EMAIL_SERVICE=gmail
-EMAIL_USER=your_email@gmail.com
-EMAIL_PASSWORD=your_email_password
-
-# Server
-PORT=5000
-```
-
-#### Frontend (.env in front-end/ directory)
-```env
-REACT_APP_API_URL=http://localhost:5000/api
-```
+- Node.js 18+ 
+- MySQL 8.0+
+- AWS S3 account (for file storage)
 
 ### Installation
 
 1. **Clone the repository**
    ```bash
-   git clone <repository-url>
-   cd giggle-drive
+   git clone https://github.com/your-org/cloudsync.git
+   cd cloudsync
    ```
 
-2. **Install backend dependencies**
+2. **Install dependencies**
    ```bash
-   cd api
+   # Install backend dependencies
+   cd backend
+   npm install
+
+   # Install frontend dependencies
+   cd ../frontend
    npm install
    ```
 
-3. **Install frontend dependencies**
+3. **Environment setup**
    ```bash
-   cd ../front-end
-   npm install
+   # Backend environment
+   cd backend
+   cp .env.example .env
+   # Configure your environment variables
+
+   # Frontend environment
+   cd ../frontend
+   cp .env.example .env
+   # Configure your environment variables
    ```
 
-4. **Set up the database**
+4. **Database setup**
    ```bash
-   cd ../api
-   npm run migration:run
+   cd backend
+   npm run db:migrate
+   npm run db:seed
    ```
 
-5. **Start the backend server**
+5. **Start development servers**
    ```bash
-   npm start
+   # Start backend (Terminal 1)
+   cd backend
+   npm run dev
+
+   # Start frontend (Terminal 2)
+   cd frontend
+   npm run dev
+
+   # Start WebSocket service (Terminal 3)
+   cd websocket-service
+   npm run dev
    ```
 
-6. **Start the frontend development server**
-   ```bash
-   cd ../front-end
-   npm start
-   ```
+## 🧪 Testing
 
-The application will be available at:
-- Frontend: http://localhost:3000
-- Backend API: http://localhost:5000
+### Backend Testing
+```bash
+cd backend
 
-## 📋 API Endpoints
+# Run all tests
+npm test
 
-### Authentication
-- `POST /register` - User registration
-- `POST /login` - User login
-- `POST /request-reset` - Request password reset
-- `POST /reset-password` - Reset password
-- `GET /verify-token` - Verify JWT token
+# Run tests with coverage
+npm run test:coverage
 
-### Files
-- `POST /upload` - Upload file
-- `GET /files` - Get user files
-- `DELETE /files/:id` - Delete file
-- `PUT /files/:id` - Move file to folder
-- `POST /files/:id/share` - Share file
+# Run specific test suites
+npm run test:unit
+npm run test:integration
+npm run test:e2e
+```
 
-### Documents
-- `GET /documents` - Get user documents
-- `POST /documents` - Create document
-- `PUT /documents/:id` - Update document
-- `DELETE /documents/:id` - Delete document
-- `POST /documents/:id/share` - Share document
+### Frontend Testing
+```bash
+cd frontend
 
-### Folders
-- `POST /folders` - Create folder
-- `GET /folders` - Get user folders
-- `DELETE /folders/:id` - Delete folder
-- `GET /folders/:folderId/files` - Get files in folder
+# Run tests
+npm test
 
-### Teams
-- `GET /api/teams` - Get user teams
+# Run tests with coverage
+npm run test:coverage
+```
+
+## 📚 API Documentation
+
+### Authentication Endpoints
+- `POST /api/auth/register` - User registration
+- `POST /api/auth/login` - User login
+- `POST /api/auth/logout` - User logout
+- `GET /api/auth/profile` - Get user profile
+- `PUT /api/auth/profile` - Update user profile
+
+### File Management Endpoints
+- `GET /api/files` - List user files
+- `POST /api/files/upload` - Upload file
+- `GET /api/files/:id` - Get file details
+- `PUT /api/files/:id` - Update file
+- `DELETE /api/files/:id` - Delete file
+
+### Team Management Endpoints
+- `GET /api/teams` - List user teams
 - `POST /api/teams` - Create team
-- `POST /api/teams/:teamId/members` - Add team member
-- `DELETE /api/teams/:teamId/members/:memberId` - Remove team member
-- `DELETE /api/teams/:teamId` - Delete team
-- `POST /api/teams/:teamId/invite` - Send team invitation
-- `GET /api/teams/invitations` - Get pending invitations
-- `POST /api/teams/invitations/:inviteId/accept` - Accept invitation
-- `POST /api/teams/invitations/:inviteId/reject` - Reject invitation
+- `GET /api/teams/:id` - Get team details
+- `PUT /api/teams/:id` - Update team
+- `DELETE /api/teams/:id` - Delete team
 
-### Projects
-- `GET /api/projects` - Get user projects
+### Project Management Endpoints
+- `GET /api/projects` - List user projects
 - `POST /api/projects` - Create project
 - `GET /api/projects/:id` - Get project details
 - `PUT /api/projects/:id` - Update project
 - `DELETE /api/projects/:id` - Delete project
 
-### Tasks
-- `GET /api/projects/:projectId/tasks` - Get project tasks
-- `POST /api/projects/:projectId/tasks` - Create task
-- `PUT /api/tasks/:id` - Update task
-- `DELETE /api/tasks/:id` - Delete task
-- `GET /api/tasks/my-tasks` - Get user's assigned tasks
+## 🚀 Deployment
 
-## 🔧 Development
-
-### Running in Development Mode
+### Production Build
 ```bash
-# Backend
-cd api
-npm run dev
+# Backend build
+cd backend
+npm run build
 
-# Frontend
-cd front-end
-npm start
-```
-
-### Building for Production
-```bash
-# Frontend
-cd front-end
+# Frontend build
+cd frontend
 npm run build
 ```
 
-### Database Migrations
+### Environment Variables
 ```bash
-cd api
-npm run migration:run
+# Backend (.env)
+NODE_ENV=production
+PORT=3000
+DATABASE_URL=mysql://user:password@localhost/cloudsync
+JWT_SECRET=your-jwt-secret
+AWS_ACCESS_KEY_ID=your-aws-key
+AWS_SECRET_ACCESS_KEY=your-aws-secret
+AWS_S3_BUCKET=your-s3-bucket
+
+# Frontend (.env)
+REACT_APP_API_URL=http://localhost:3000/api
+REACT_APP_WS_URL=ws://localhost:3001
 ```
-
-## 🎯 Key Features Explained
-
-### Real-time Collaboration
-- Uses Socket.IO for real-time document editing
-- Multiple users can edit the same document simultaneously
-- Live cursor tracking shows who is editing where
-- Auto-save functionality prevents data loss
-
-### Project Management
-- Kanban-style task management with status columns
-- Task assignment and priority management
-- Due date tracking with overdue notifications
-- Project progress visualization
-- Team-based project organization
-
-### File Management
-- AWS S3 integration for scalable file storage
-- Folder organization with nested structure
-- File sharing between users
-- Support for various file types
-- Secure file access control
-
-### Team Collaboration
-- Team creation and member management
-- Real-time team chat
-- Team invitation system
-- Role-based access control
-- Project assignment to teams
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-1. **Database Connection Error**
-   - Ensure MySQL is running
-   - Check database credentials in `.env`
-   - Verify database exists
-
-2. **AWS S3 Upload Issues**
-   - Verify AWS credentials
-   - Check S3 bucket permissions
-   - Ensure bucket region is correct
-
-3. **Email Not Working**
-   - Check email service credentials
-   - Verify email service settings
-   - Test with a valid email address
-
-4. **Real-time Features Not Working**
-   - Ensure Socket.IO server is running
-   - Check CORS settings
-   - Verify WebSocket connections
 
 ## 🤝 Contributing
 
 1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+### Development Guidelines
+- Follow the existing code style
+- Write tests for new features
+- Update documentation as needed
+- Ensure all tests pass before submitting
 
 ## 📄 License
 
-This project is licensed under the MIT License.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
+## 🆘 Support
 
-- React team for the amazing framework
-- TypeORM for excellent database management
-- Tailwind CSS for the utility-first approach
-- AWS for reliable cloud services
-- Socket.IO for real-time capabilities
+For support and questions:
+- 📧 Email: support@cloudsync.com
+- 📖 Documentation: [docs.cloudsync.com](https://docs.cloudsync.com)
+- 🐛 Issues: [GitHub Issues](https://github.com/your-org/cloudsync/issues)
 
 ---
 
-**Giggle Drive** - Making collaboration simple and efficient! 🚀 
+**CloudSync** - Empowering teams with seamless file management and collaboration. 🚀 

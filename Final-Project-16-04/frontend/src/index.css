@@ -1,0 +1,1712 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --primary: #0078d4;
+    --primary-dark: #106ebe;
+    --secondary: #f3f2f1;
+    --accent: #2b88d8;
+  }
+
+  body {
+    @apply bg-[#f3f2f1] dark:bg-gray-900 text-gray-900 dark:text-gray-100;
+    margin: 0;
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Roboto', 'Oxygen',
+      'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+      sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+
+  /* Ensure root element has proper background */
+  html {
+    @apply bg-[#f3f2f1] dark:bg-gray-900;
+    transition: background-color 0.3s ease;
+  }
+
+    /* Cursor blinking animation for collaborative editing */
+  @keyframes cursor-blink {
+    0%, 50% {
+      opacity: 1;
+    }
+    51%, 100% {
+      opacity: 0;
+    }
+  }
+
+  /* Custom TipTap Editor Styles - Word-like appearance */
+  .ProseMirror {
+    outline: none !important;
+    padding: 20px !important;
+    line-height: 1.6 !important;
+  }
+
+  /* Custom editor container styles */
+  .custom-editor {
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif !important;
+    max-width: 100% !important;
+  }
+
+  .custom-editor-content {
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif !important;
+  }
+
+  /* Enhanced Headers - Blue like Microsoft Word - REASONABLE SIZES */
+  .ProseMirror h1,
+  .custom-editor h1,
+  .custom-editor-content h1 {
+    font-size: 1.875rem; /* 30px - default size, can be overridden */
+    font-weight: 700 !important;
+    color: #0078d4 !important;
+    margin: 1.5rem 0 1rem 0 !important;
+    border-bottom: 2px solid #0078d4 !important;
+    padding-bottom: 0.5rem !important;
+    position: relative !important;
+    cursor: pointer !important;
+    line-height: 1.3 !important;
+    font-family: inherit !important;
+  }
+
+  .ProseMirror h2,
+  .custom-editor h2,
+  .custom-editor-content h2 {
+    font-size: 1.5rem; /* 24px - default size, can be overridden */
+    font-weight: 600 !important;
+    color: #106ebe !important;
+    margin: 1.25rem 0 0.75rem 0 !important;
+    border-left: 3px solid #106ebe !important;
+    padding-left: 1rem !important;
+    cursor: pointer !important;
+    line-height: 1.4 !important;
+    font-family: inherit !important;
+  }
+
+  .ProseMirror h3,
+  .custom-editor h3,
+  .custom-editor-content h3 {
+    font-size: 1.25rem; /* 20px - default size, can be overridden */
+    font-weight: 600 !important;
+    color: #2b88d8 !important;
+    margin: 1rem 0 0.5rem 0 !important;
+    cursor: pointer !important;
+    line-height: 1.5 !important;
+    border-bottom: 1px solid #2b88d8 !important;
+    padding-bottom: 0.25rem !important;
+    font-family: inherit !important;
+  }
+
+  /* Allow custom font sizes to override header defaults */
+  .ProseMirror h1[style*="font-size"],
+  .ProseMirror h2[style*="font-size"],
+  .ProseMirror h3[style*="font-size"],
+  .custom-editor h1[style*="font-size"],
+  .custom-editor h2[style*="font-size"],
+  .custom-editor h3[style*="font-size"],
+  .custom-editor-content h1[style*="font-size"],
+  .custom-editor-content h2[style*="font-size"],
+  .custom-editor-content h3[style*="font-size"] {
+    font-size: inherit !important; /* Use the inline style font-size */
+  }
+
+  /* Header hover effects */
+  .ProseMirror h1:hover,
+  .ProseMirror h2:hover,
+  .ProseMirror h3:hover,
+  .custom-editor h1:hover,
+  .custom-editor h2:hover,
+  .custom-editor h3:hover,
+  .custom-editor-content h1:hover,
+  .custom-editor-content h2:hover,
+  .custom-editor-content h3:hover {
+    opacity: 0.9 !important;
+    transition: all 0.2s ease !important;
+    background-color: rgba(0, 120, 212, 0.08) !important;
+    border-radius: 6px !important;
+    padding: 0.5rem !important;
+    margin-left: -0.5rem !important;
+    margin-right: -0.5rem !important;
+  }
+
+  /* Header text shadow for better readability */
+  .ProseMirror h1,
+  .ProseMirror h2,
+  .ProseMirror h3,
+  .custom-editor h1,
+  .custom-editor h2,
+  .custom-editor h3,
+  .custom-editor-content h1,
+  .custom-editor-content h2,
+  .custom-editor-content h3 {
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1) !important;
+  }
+
+  /* Header collapse indicators */
+  .ProseMirror h1::before,
+  .ProseMirror h2::before,
+  .ProseMirror h3::before {
+    content: "▼" !important;
+    display: inline-block !important;
+    margin-right: 0.5rem !important;
+    font-size: 0.8em !important;
+    color: #0078d4 !important;
+    transition: transform 0.2s ease !important;
+    cursor: pointer !important;
+  }
+
+  .ProseMirror h1.collapsed::before,
+  .ProseMirror h2.collapsed::before,
+  .ProseMirror h3.collapsed::before {
+    transform: rotate(-90deg) !important;
+  }
+
+  /* Collapsed content styling */
+  .collapsed-content {
+    max-height: 0 !important;
+    overflow: hidden !important;
+    transition: max-height 0.3s ease !important;
+  }
+
+  .expanded-content {
+    max-height: none !important;
+    transition: max-height 0.3s ease !important;
+  }
+
+  /* Enhanced Blockquotes */
+  .ProseMirror blockquote {
+    border-left: 4px solid #0078d4 !important;
+    background-color: #f8f9ff !important;
+    margin: 1rem 0 !important;
+    padding: 1rem 1.5rem !important;
+    font-style: italic !important;
+    color: #4a5568 !important;
+    border-radius: 0 6px 6px 0 !important;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05) !important;
+  }
+
+  .dark .ProseMirror blockquote {
+    background-color: #1a202c !important;
+    color: #cbd5e0 !important;
+    border-left-color: #2b88d8 !important;
+  }
+
+  /* Better paragraph spacing */
+  .ProseMirror p {
+    margin: 0.75rem 0 !important;
+  }
+
+  /* Enhanced lists */
+  .ProseMirror ul, .ProseMirror ol {
+    margin: 1rem 0 !important;
+    padding-left: 2rem !important;
+  }
+
+  .ProseMirror li {
+    margin: 0.25rem 0 !important;
+  }
+
+  /* Code blocks */
+  .ProseMirror pre {
+    background-color: #f6f8fa !important;
+    border: 1px solid #e1e4e8 !important;
+    border-radius: 6px !important;
+    padding: 1rem !important;
+    margin: 1rem 0 !important;
+    overflow-x: auto !important;
+  }
+
+  .dark .ProseMirror pre {
+    background-color: #161b22 !important;
+    border-color: #30363d !important;
+  }
+
+  /* Inline code */
+  .ProseMirror code {
+    background-color: #f6f8fa !important;
+    border: 1px solid #e1e4e8 !important;
+    border-radius: 3px !important;
+    padding: 0.2rem 0.4rem !important;
+    font-size: 0.9em !important;
+  }
+
+  .dark .ProseMirror code {
+    background-color: #161b22 !important;
+    border-color: #30363d !important;
+  }
+
+  /* Tables */
+  .ProseMirror table {
+    border-collapse: collapse !important;
+    margin: 1rem 0 !important;
+    width: 100% !important;
+  }
+
+  .ProseMirror table td, .ProseMirror table th {
+    border: 1px solid #d1d5db !important;
+    padding: 0.5rem 1rem !important;
+  }
+
+  .ProseMirror table th {
+    background-color: #f9fafb !important;
+    font-weight: 600 !important;
+  }
+
+  .dark .ProseMirror table td, .dark .ProseMirror table th {
+    border-color: #4b5563 !important;
+  }
+
+  .dark .ProseMirror table th {
+    background-color: #374151 !important;
+  }
+
+  /* Dark mode header adjustments */
+  .dark .ProseMirror h1,
+  .dark .custom-editor h1,
+  .dark .custom-editor-content h1 {
+    color: #60A5FA !important;
+    border-bottom-color: #60A5FA !important;
+  }
+
+  .dark .ProseMirror h2,
+  .dark .custom-editor h2,
+  .dark .custom-editor-content h2 {
+    color: #93C5FD !important;
+    border-left-color: #93C5FD !important;
+  }
+
+  .dark .ProseMirror h3,
+  .dark .custom-editor h3,
+  .dark .custom-editor-content h3 {
+    color: #BFDBFE !important;
+    border-bottom-color: #BFDBFE !important;
+  }
+
+  .dark .ProseMirror h1:hover,
+  .dark .ProseMirror h2:hover,
+  .dark .ProseMirror h3:hover,
+  .dark .custom-editor h1:hover,
+  .dark .custom-editor h2:hover,
+  .dark .custom-editor h3:hover,
+  .dark .custom-editor-content h1:hover,
+  .dark .custom-editor-content h2:hover,
+  .dark .custom-editor-content h3:hover {
+    background-color: rgba(96, 165, 250, 0.1) !important;
+  }
+
+  /* Fix white gaps by ensuring all containers have proper backgrounds */
+  #root {
+    @apply bg-[#f3f2f1] dark:bg-gray-900 min-h-screen;
+    transition: background-color 0.3s ease;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply px-5 py-2.5 rounded-md font-semibold text-base transition-all duration-200 ease-in-out shadow focus:outline-none;
+  }
+  .btn-primary {
+    @apply bg-[#0078d4] text-white hover:bg-[#005a9e] shadow-md border border-[#0078d4] dark:bg-blue-600 dark:hover:bg-blue-700 dark:border-blue-600;
+  }
+  .btn-secondary {
+    @apply bg-white dark:bg-gray-800 border border-[#0078d4] dark:border-blue-600 text-[#0078d4] dark:text-blue-400 hover:bg-[#e5f1fb] dark:hover:bg-gray-700 shadow-sm;
+  }
+  .btn-lg {
+    @apply px-6 py-3 text-lg;
+  }
+  .card {
+    @apply bg-white dark:bg-gray-800 rounded-md shadow-md border border-gray-300 dark:border-gray-700 transition-all duration-200;
+  }
+  .tab-active {
+    @apply bg-[#e5f1fb] dark:bg-blue-900/30 text-[#0078d4] dark:text-blue-400 font-bold shadow-sm rounded-md px-4 py-2 border border-[#c7e0f4] dark:border-blue-800;
+  }
+  .tab-inactive {
+    @apply bg-transparent text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md px-4 py-2 transition-colors;
+  }
+  .tab-lg {
+    @apply text-base px-6 py-3;
+  }
+  .tab-clear-active {
+    @apply bg-[#0078d4] dark:bg-blue-600 text-white font-bold shadow rounded-lg px-6 py-2 border border-[#0078d4] dark:border-blue-600 z-10;
+  }
+  .tab-clear-inactive {
+    @apply bg-[#e5f1fb] dark:bg-gray-800 text-[#0078d4] dark:text-blue-400 font-semibold rounded-lg px-6 py-2 border border-[#c7e0f4] dark:border-gray-700 hover:bg-[#0078d4] hover:text-white dark:hover:bg-blue-600 transition-colors z-0;
+  }
+  .menu-panel {
+    @apply bg-white dark:bg-gray-800 shadow-lg border border-[#c7e0f4] dark:border-gray-700 rounded-lg py-2 z-50;
+  }
+  .menu-item {
+    @apply flex items-center w-full text-left px-5 py-3 text-base font-semibold text-[#0078d4] dark:text-blue-400 hover:bg-[#0078d4] hover:text-white dark:hover:bg-blue-600 transition-colors rounded-md cursor-pointer;
+  }
+  .menu-item-icon {
+    @apply mr-3 text-lg;
+  }
+}
+
+.loading-spinner {
+  @apply relative w-12 h-12;
+}
+
+.loading-spinner::after {
+  content: '';
+  @apply absolute w-full h-full rounded-full border-4 border-primary border-t-transparent animate-spin;
+}
+
+input[placeholder="Untitled Document"] {
+  @apply text-xl font-semibold text-gray-800 w-full;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  appearance: none !important;
+  background: transparent !important;
+}
+
+[contenteditable="true"]:focus {
+  outline: none !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.tiptap-page {
+  width: 794px; /* A4 width at 96dpi */
+  min-height: 1123px; /* A4 height at 96dpi */
+  @apply my-8 mx-auto bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-lg p-8 relative overflow-hidden box-border transition-colors duration-200;
+}
+
+.tiptap-paged-editor {
+  @apply bg-gray-100 dark:bg-gray-900 min-h-screen py-8 transition-colors duration-200;
+}
+
+.tiptap-collaboration-cursor__label {
+  display: none !important;
+}
+
+.tiptap-collaboration-cursor__selection {
+  display: none !important;
+}
+
+/* Animations */
+.fade-enter {
+  opacity: 0;
+}
+
+.fade-enter-active {
+  opacity: 1;
+  transition: opacity 200ms ease-in;
+}
+
+.fade-exit {
+  opacity: 1;
+}
+
+.fade-exit-active {
+  opacity: 0;
+  transition: opacity 200ms ease-out;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .tiptap-page {
+    width: 100%;
+    margin: 1rem;
+    padding: 1rem;
+  }
+}
+
+/* Hide any span or mark with a background color inside the editor, except for your own selection */
+.tiptap-page span[style*="background-color"],
+.tiptap-page mark[style*="background-color"] {
+  background: none !important;
+}
+
+/* Hide the inline caret element inserted by ProseMirror */
+.collaboration-cursor__caret.ProseMirror-widget {
+  display: none !important;
+}
+
+/* Styles for the absolutely positioned label rendered by the overlay */
+.collaboration-cursor__caret.ProseMirror-widget div.collaboration-cursor__label {
+  /* These styles are handled by the CollaborationCursorOverlay component's inline styles,
+     but keep these here to ensure no default block display interferes if not overridden inline. */
+  display: inline !important; /* Counteract default block display */
+  position: absolute !important; /* Ensure it's out of normal flow if not already */
+  margin: 0 !important;
+  padding: 0 !important;
+  width: auto !important; /* Let content determine width */
+  height: auto !important; /* Let content determine height */
+  white-space: nowrap !important; /* Prevent label text wrapping */
+}
+
+/* Define a blinking animation for the cursor */
+@keyframes cursor-blink {
+  0% { opacity: 0; }
+  50% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* CSS class to apply the blinking animation to the caret */
+.collaboration-caret-blink {
+  animation: cursor-blink 1s step-end infinite;
+}
+
+/* Loading Spinner */
+.loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #3b82f6;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Line clamp utilities */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+/* Dark mode scrollbar */
+.dark ::-webkit-scrollbar-track {
+  background: #374151;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #6b7280;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+/* Custom table scrollbar */
+.table-scrollbar::-webkit-scrollbar {
+  height: 12px;
+}
+
+.table-scrollbar::-webkit-scrollbar-track {
+  background: #f8fafc;
+  border-radius: 6px;
+}
+
+.table-scrollbar::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 6px;
+  border: 2px solid #f8fafc;
+}
+
+.table-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Dark mode table scrollbar */
+.dark .table-scrollbar::-webkit-scrollbar-track {
+  background: #374151;
+}
+
+.dark .table-scrollbar::-webkit-scrollbar-thumb {
+  background: #6b7280;
+  border: 2px solid #374151;
+}
+
+.dark .table-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+/* Table responsive fixes */
+.table-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 #f8fafc;
+}
+
+.dark .table-scrollbar {
+  scrollbar-color: #6b7280 #374151;
+}
+
+/* Ensure table doesn't break on small screens */
+@media (max-width: 768px) {
+  .table-scrollbar {
+    overflow-x: auto;
+  }
+}
+
+/* Table responsive design */
+@media (max-width: 768px) {
+  /* Mobile table styles */
+  .table-responsive {
+    font-size: 0.875rem;
+  }
+  
+  .table-responsive th,
+  .table-responsive td {
+    padding: 0.75rem 0.5rem;
+  }
+}
+
+@media (min-width: 769px) {
+  /* Desktop table styles */
+  .table-responsive {
+    font-size: 0.875rem;
+  }
+  
+  .table-responsive th,
+  .table-responsive td {
+    padding: 1rem 1.5rem;
+  }
+}
+
+/* Simple list view table */
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+table th,
+table td {
+  padding: 12px 16px;
+  vertical-align: middle;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.dark table th,
+.dark table td {
+  border-bottom: 1px solid #374151;
+}
+
+/* Table text truncation */
+.table-fixed {
+  table-layout: fixed;
+}
+
+.table-fixed td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.table-fixed td .truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Focus styles */
+.focus\:outline-none:focus {
+  outline: none;
+}
+
+.focus\:shadow-outline:focus {
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5);
+}
+
+/* Button hover effects */
+.hover\:bg-blue-600:hover {
+  background-color: #2563eb;
+}
+
+.hover\:bg-red-600:hover {
+  background-color: #dc2626;
+}
+
+.hover\:bg-green-600:hover {
+  background-color: #16a34a;
+}
+
+.hover\:bg-gray-600:hover {
+  background-color: #4b5563;
+}
+
+/* Text hover effects */
+.hover\:text-blue-700:hover {
+  color: #1d4ed8;
+}
+
+.hover\:text-red-700:hover {
+  color: #b91c1c;
+}
+
+.hover\:text-gray-700:hover {
+  color: #374151;
+}
+
+/* Shadow effects */
+.hover\:shadow-lg:hover {
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+}
+
+.hover\:shadow-md:hover {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+/* Transition effects */
+.transition-shadow {
+  transition: box-shadow 0.15s ease-in-out;
+}
+
+.transition-colors {
+  transition: color 0.15s ease-in-out, background-color 0.15s ease-in-out, border-color 0.15s ease-in-out;
+}
+
+.transition-all {
+  transition: all 0.15s ease-in-out;
+}
+
+/* Animation effects */
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: .5;
+  }
+}
+
+/* Modal backdrop blur */
+.backdrop-blur-sm {
+  backdrop-filter: blur(4px);
+}
+
+/* Modal dark mode improvements */
+.modal-backdrop {
+  @apply bg-black/50 dark:bg-black/70;
+}
+
+.modal-content {
+  @apply bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700;
+}
+
+/* Input and form improvements for dark mode */
+input[type="text"], 
+input[type="email"], 
+input[type="password"], 
+textarea, 
+select {
+  @apply bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400;
+}
+
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus,
+textarea:focus,
+select:focus {
+  @apply ring-blue-500 dark:ring-blue-400 border-blue-500 dark:border-blue-400;
+}
+
+/* Z-index utilities */
+.z-10 {
+  z-index: 10;
+}
+
+.z-50 {
+  z-index: 50;
+}
+
+/* Border utilities */
+.border-l-4 {
+  border-left-width: 4px;
+}
+
+.border-l-blue-500 {
+  border-left-color: #3b82f6;
+}
+
+.border-l-red-500 {
+  border-left-color: #ef4444;
+}
+
+/* Text utilities */
+.text-xs {
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+
+.text-sm {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+.text-lg {
+  font-size: 1.125rem;
+  line-height: 1.75rem;
+}
+
+.text-xl {
+  font-size: 1.25rem;
+  line-height: 1.75rem;
+}
+
+.text-2xl {
+  font-size: 1.5rem;
+  line-height: 2rem;
+}
+
+.text-3xl {
+  font-size: 1.875rem;
+  line-height: 2.25rem;
+}
+
+.text-6xl {
+  font-size: 3.75rem;
+  line-height: 1;
+}
+
+/* Font weight utilities */
+.font-medium {
+  font-weight: 500;
+}
+
+.font-semibold {
+  font-weight: 600;
+}
+
+.font-bold {
+  font-weight: 700;
+}
+
+/* Spacing utilities */
+.space-x-1 > * + * {
+  margin-left: 0.25rem;
+}
+
+.space-x-2 > * + * {
+  margin-left: 0.5rem;
+}
+
+.space-y-1 > * + * {
+  margin-top: 0.25rem;
+}
+
+.space-y-2 > * + * {
+  margin-top: 0.5rem;
+}
+
+.space-y-3 > * + * {
+  margin-top: 0.75rem;
+}
+
+.space-y-4 > * + * {
+  margin-top: 1rem;
+}
+
+.space-y-6 > * + * {
+  margin-top: 1.5rem;
+}
+
+/* Grid utilities */
+.grid-cols-1 {
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+}
+
+@media (min-width: 768px) {
+  .md\:grid-cols-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .lg\:grid-cols-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* Gap utilities */
+.gap-1 {
+  gap: 0.25rem;
+}
+
+.gap-2 {
+  gap: 0.5rem;
+}
+
+.gap-3 {
+  gap: 0.75rem;
+}
+
+.gap-4 {
+  gap: 1rem;
+}
+
+.gap-6 {
+  gap: 1.5rem;
+}
+
+/* Flex utilities */
+.flex-1 {
+  flex: 1 1 0%;
+}
+
+.flex-wrap {
+  flex-wrap: wrap;
+}
+
+.items-center {
+  align-items: center;
+}
+
+.items-start {
+  align-items: flex-start;
+}
+
+.justify-between {
+  justify-content: space-between;
+}
+
+.justify-center {
+  justify-content: center;
+}
+
+.justify-end {
+  justify-content: flex-end;
+}
+
+/* Position utilities */
+.relative {
+  position: relative;
+}
+
+.absolute {
+  position: absolute;
+}
+
+.fixed {
+  position: fixed;
+}
+
+.inset-0 {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+}
+
+/* Display utilities */
+.block {
+  display: block;
+}
+
+.flex {
+  display: flex;
+}
+
+.grid {
+  display: grid;
+}
+
+.inline {
+  display: inline;
+}
+
+.inline-block {
+  display: inline-block;
+}
+
+.inline-flex {
+  display: inline-flex;
+}
+
+.hidden {
+  display: none;
+}
+
+/* Responsive utilities */
+@media (min-width: 1024px) {
+  .lg\:hidden {
+    display: none;
+  }
+}
+
+/* Width and height utilities */
+.w-full {
+  width: 100%;
+}
+
+.w-3 {
+  width: 0.75rem;
+}
+
+.w-10 {
+  width: 2.5rem;
+}
+
+.w-32 {
+  width: 8rem;
+}
+
+.w-64 {
+  width: 16rem;
+}
+
+.h-2 {
+  height: 0.5rem;
+}
+
+.h-3 {
+  height: 0.75rem;
+}
+
+.h-5 {
+  height: 1.25rem;
+}
+
+.h-10 {
+  height: 2.5rem;
+}
+
+.h-64 {
+  height: 16rem;
+}
+
+.h-full {
+  height: 100%;
+}
+
+.h-screen {
+  height: 100vh;
+}
+
+/* Padding utilities */
+.p-1 {
+  padding: 0.25rem;
+}
+
+.p-2 {
+  padding: 0.5rem;
+}
+
+.p-3 {
+  padding: 0.75rem;
+}
+
+.p-4 {
+  padding: 1rem;
+}
+
+.p-6 {
+  padding: 1.5rem;
+}
+
+.p-8 {
+  padding: 2rem;
+}
+
+.px-1 {
+  padding-left: 0.25rem;
+  padding-right: 0.25rem;
+}
+
+.px-2 {
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+}
+
+.px-3 {
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+}
+
+.px-4 {
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+.px-6 {
+  padding-left: 1.5rem;
+  padding-right: 1.5rem;
+}
+
+.py-1 {
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+}
+
+.py-2 {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+
+.py-3 {
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+}
+
+.py-4 {
+  padding-top: 1rem;
+  padding-bottom: 1rem;
+}
+
+.py-8 {
+  padding-top: 2rem;
+  padding-bottom: 2rem;
+}
+
+.py-12 {
+  padding-top: 3rem;
+  padding-bottom: 3rem;
+}
+
+/* Margin utilities */
+.m-1 {
+  margin: 0.25rem;
+}
+
+.m-2 {
+  margin: 0.5rem;
+}
+
+.m-4 {
+  margin: 1rem;
+}
+
+.m-6 {
+  margin: 1.5rem;
+}
+
+.mx-auto {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.mx-1 {
+  margin-left: 0.25rem;
+  margin-right: 0.25rem;
+}
+
+.mx-2 {
+  margin-left: 0.5rem;
+  margin-right: 0.5rem;
+}
+
+.mr-1 {
+  margin-right: 0.25rem;
+}
+
+.mr-2 {
+  margin-right: 0.5rem;
+}
+
+.mr-3 {
+  margin-right: 0.75rem;
+}
+
+.ml-1 {
+  margin-left: 0.25rem;
+}
+
+.ml-2 {
+  margin-left: 0.5rem;
+}
+
+.ml-3 {
+  margin-left: 0.75rem;
+}
+
+.ml-auto {
+  margin-left: auto;
+}
+
+.mb-1 {
+  margin-bottom: 0.25rem;
+}
+
+.mb-2 {
+  margin-bottom: 0.5rem;
+}
+
+.mb-3 {
+  margin-bottom: 0.75rem;
+}
+
+.mb-4 {
+  margin-bottom: 1rem;
+}
+
+.mb-6 {
+  margin-bottom: 1.5rem;
+}
+
+.mt-1 {
+  margin-top: 0.25rem;
+}
+
+.mt-2 {
+  margin-top: 0.5rem;
+}
+
+.mt-4 {
+  margin-top: 1rem;
+}
+
+/* Border radius utilities */
+.rounded {
+  border-radius: 0.25rem;
+}
+
+.rounded-lg {
+  border-radius: 0.5rem;
+}
+
+.rounded-md {
+  border-radius: 0.375rem;
+}
+
+.rounded-full {
+  border-radius: 9999px;
+}
+
+/* Border utilities */
+.border {
+  border-width: 1px;
+}
+
+.border-l {
+  border-left-width: 1px;
+}
+
+.border-t {
+  border-top-width: 1px;
+}
+
+.border-r {
+  border-right-width: 1px;
+}
+
+.border-b {
+  border-bottom-width: 1px;
+}
+
+.border-gray-200 {
+  border-color: #e5e7eb;
+}
+
+.border-gray-400 {
+  border-color: #9ca3af;
+}
+
+.border-red-400 {
+  border-color: #f87171;
+}
+
+/* Background utilities */
+.bg-white {
+  background-color: #ffffff;
+}
+
+.bg-gray-50 {
+  background-color: #f9fafb;
+}
+
+.bg-gray-100 {
+  background-color: #f3f4f6;
+}
+
+.bg-gray-200 {
+  background-color: #e5e7eb;
+}
+
+.bg-gray-400 {
+  background-color: #9ca3af;
+}
+
+.bg-gray-500 {
+  background-color: #6b7280;
+}
+
+.bg-gray-600 {
+  background-color: #4b5563;
+}
+
+.bg-blue-100 {
+  background-color: #dbeafe;
+}
+
+.bg-blue-400 {
+  background-color: #60a5fa;
+}
+
+.bg-blue-500 {
+  background-color: #3b82f6;
+}
+
+.bg-blue-600 {
+  background-color: #2563eb;
+}
+
+.bg-blue-700 {
+  background-color: #1d4ed8;
+}
+
+.bg-green-100 {
+  background-color: #dcfce7;
+}
+
+.bg-green-400 {
+  background-color: #4ade80;
+}
+
+.bg-green-500 {
+  background-color: #22c55e;
+}
+
+.bg-green-600 {
+  background-color: #16a34a;
+}
+
+.bg-red-100 {
+  background-color: #fee2e2;
+}
+
+.bg-red-400 {
+  background-color: #f87171;
+}
+
+.bg-red-500 {
+  background-color: #ef4444;
+}
+
+.bg-red-600 {
+  background-color: #dc2626;
+}
+
+.bg-yellow-100 {
+  background-color: #fef3c7;
+}
+
+.bg-yellow-600 {
+  background-color: #d97706;
+}
+
+.bg-black {
+  background-color: #000000;
+}
+
+.bg-opacity-50 {
+  --tw-bg-opacity: 0.5;
+}
+
+/* Text color utilities */
+.text-white {
+  color: #ffffff;
+}
+
+.text-gray-400 {
+  color: #9ca3af;
+}
+
+.text-gray-500 {
+  color: #6b7280;
+}
+
+.text-gray-600 {
+  color: #4b5563;
+}
+
+.text-gray-700 {
+  color: #374151;
+}
+
+.text-gray-900 {
+  color: #111827;
+}
+
+.text-blue-500 {
+  color: #3b82f6;
+}
+
+.text-blue-600 {
+  color: #2563eb;
+}
+
+.text-blue-700 {
+  color: #1d4ed8;
+}
+
+.text-green-500 {
+  color: #22c55e;
+}
+
+.text-green-600 {
+  color: #16a34a;
+}
+
+.text-red-500 {
+  color: #ef4444;
+}
+
+.text-red-600 {
+  color: #dc2626;
+}
+
+.text-red-700 {
+  color: #b91c1c;
+}
+
+.text-yellow-600 {
+  color: #d97706;
+}
+
+/* Shadow utilities */
+.shadow {
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+}
+
+.shadow-sm {
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+}
+
+.shadow-md {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+.shadow-lg {
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+}
+
+.shadow-xl {
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
+
+/* Overflow utilities */
+.overflow-hidden {
+  overflow: hidden;
+}
+
+.overflow-y-auto {
+  overflow-y: auto;
+}
+
+/* Object fit utilities */
+.object-cover {
+  object-fit: cover;
+}
+
+/* Cursor utilities */
+.cursor-pointer {
+  cursor: pointer;
+}
+
+/* User select utilities */
+.select-none {
+  user-select: none;
+}
+
+/* Transform utilities */
+.transform {
+  transform: translate(var(--tw-translate-x), var(--tw-translate-y)) rotate(var(--tw-rotate)) skewX(var(--tw-skew-x)) skewY(var(--tw-skew-y)) scaleX(var(--tw-scale-x)) scaleY(var(--tw-scale-y));
+}
+
+/* Transition utilities */
+.duration-200 {
+  transition-duration: 200ms;
+}
+
+.duration-300 {
+  transition-duration: 300ms;
+}
+
+/* Ease utilities */
+.ease-in-out {
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Min width utilities */
+.min-w-0 {
+  min-width: 0px;
+}
+
+/* Truncate utilities */
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Force default text color in Tiptap editor, responsive to theme */
+.tiptap-page, .tiptap-page * {
+  color: #111 !important;
+}
+
+.dark .tiptap-page, .dark .tiptap-page * {
+  color: #f3f4f6 !important;
+}
+
+/* Preserve user-applied colors */
+.tiptap-page mark[style*="color"], 
+.tiptap-page span[style*="color"] {
+  color: inherit !important;
+}
+
+/* Utility classes for teams */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Smooth transitions */
+.transition-all {
+  transition: all 0.3s ease-in-out;
+}
+
+.transition-colors {
+  transition: color 0.2s ease-in-out, background-color 0.2s ease-in-out;
+}
+
+/* Custom scrollbar for modals */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+/* Dark mode scrollbar */
+.dark .custom-scrollbar::-webkit-scrollbar-track {
+  background: #374151;
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #6b7280;
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+/* Performance optimization for animations */
+.gpu-accelerated {
+  transform: translateZ(0);
+  will-change: transform;
+}
+
+/* Enhanced card hover effects */
+.enhanced-card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+}
+
+/* Skeleton loading animation */
+@keyframes skeleton-loading {
+  0% {
+    background-position: -200px 0;
+  }
+  100% {
+    background-position: calc(200px + 100%) 0;
+  }
+}
+
+.skeleton {
+  display: inline-block;
+  height: 1em;
+  position: relative;
+  overflow: hidden;
+  background-color: #eee;
+  background-image: linear-gradient(
+    90deg,
+    #eee,
+    #f5f5f5,
+    #eee
+  );
+  background-size: 200px 100%;
+  background-repeat: no-repeat;
+  border-radius: 4px;
+  animation: skeleton-loading 1.2s ease-in-out infinite;
+}
+
+.dark .skeleton {
+  background-color: #374151;
+  background-image: linear-gradient(
+    90deg,
+    #374151,
+    #4b5563,
+    #374151
+  );
+}
+
+/* Fade-in animation for user chips */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out;
+}
+
+/* Pulse animation for loading */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Bounce animation for buttons */
+@keyframes bounce-in {
+  0% {
+    transform: scale(0.3);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  70% {
+    transform: scale(0.9);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-bounce-in {
+  animation: bounce-in 0.5s ease-out;
+}
+
+/* Shimmer effect for loading states */
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+.shimmer {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 1000px 100%;
+  animation: shimmer 2s infinite;
+}
+
+.dark .shimmer {
+  background: linear-gradient(90deg, #374151 25%, #4b5563 50%, #374151 75%);
+  background-size: 1000px 100%;
+}
+
+/* Smooth hover effects */
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  transition: all 0.3s ease;
+}
+
+.hover-scale:hover {
+  transform: scale(1.05);
+  transition: transform 0.2s ease;
+}
+
+/* Focus rings */
+.focus-ring:focus {
+  outline: none;
+  ring: 2px;
+  ring-color: #3b82f6;
+  ring-offset: 2px;
+}
+
+/* Custom checkbox */
+.custom-checkbox {
+  appearance: none;
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 2px solid #d1d5db;
+  border-radius: 0.25rem;
+  background-color: white;
+  cursor: pointer;
+  position: relative;
+  transition: all 0.2s ease;
+}
+
+.custom-checkbox:checked {
+  background-color: #3b82f6;
+  border-color: #3b82f6;
+}
+
+.custom-checkbox:checked::after {
+  content: '✓';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: white;
+  font-size: 0.875rem;
+  font-weight: bold;
+}
+
+.dark .custom-checkbox {
+  border-color: #6b7280;
+  background-color: #374151;
+}
+
+.dark .custom-checkbox:checked {
+  background-color: #3b82f6;
+  border-color: #3b82f6;
+}
+
+

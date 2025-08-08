@@ -2,6 +2,8 @@
   "dependencies": {
     "@headlessui/react": "^2.2.4",
     "@tiptap/extension-highlight": "^3.0.7",
-    "jspdf": "^3.0.1"
+    "jspdf": "^3.0.1",
+    "socket.io-client": "^4.8.1",
+    "ws": "^8.18.3"
   }
 }
