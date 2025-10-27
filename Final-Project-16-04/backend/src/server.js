@@ -1,5 +1,9 @@
-require("dotenv").config();
-
+require('dotenv').config({ path: __dirname + '/../.env' });
+console.log('AWS Credentials:', {
+  key: process.env.AWS_ACCESS_KEY_ID ? '✅ Loaded' : '❌ Missing',
+  secret: process.env.AWS_SECRET_ACCESS_KEY ? '✅ Loaded' : '❌ Missing',
+  region: process.env.AWS_REGION,
+});
 const express = require("express");
 const cors = require("cors");
 const http = require("http");

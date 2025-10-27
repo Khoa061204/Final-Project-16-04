@@ -355,10 +355,7 @@ router.delete('/:id', async (req, res) => {
   try {
     const teamId = parseInt(req.params.id);
     if (isNaN(teamId) || teamId <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid team ID'
-      });
+      return res.status(400).json({ success: false, message: 'Invalid team ID' });
     }
 
     const currentUserId = req.user.id;
@@ -369,49 +366,27 @@ router.delete('/:id', async (req, res) => {
     const Invitation = require('../models/Invitation');
     const invitationRepo = AppDataSource.getRepository(Invitation);
 
-    // Get team details
+    // ✅ Fetch the actual team entity
     const team = await teamRepo.findOne({ where: { id: teamId } });
     if (!team) {
-      return res.status(404).json({
-        success: false,
-        message: 'Team not found'
-      });
+      return res.status(404).json({ success: false, message: 'Team not found' });
     }
 
-    // Check if user is the creator
-    if (team.creator_id !== currentUserId) {
-      return res.status(403).json({
-        success: false,
-        message: 'Only team creators can delete teams'
-      });
-    }
-
-    // Start a transaction to ensure data integrity
+    // ✅ Use transaction for safety
     await AppDataSource.transaction(async transactionalEntityManager => {
-      // First, set teamId to null for all projects belonging to this team
       await transactionalEntityManager.update(Project, { teamId: teamId }, { teamId: null });
-      
-      // Delete all pending invitations for this team
       await transactionalEntityManager.delete(Invitation, { teamId: teamId });
-      
-      // Delete all team members
       await transactionalEntityManager.delete(teamMemberRepo.target, { team_id: teamId });
-      
-      // Finally, delete the team
-      await transactionalEntityManager.remove(team);
+      await transactionalEntityManager.remove(Team, team); // ✅ fixed
     });
 
     res.json({
       success: true,
       message: 'Team deleted successfully'
     });
-
   } catch (error) {
     console.error('Error deleting team:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
+    res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
 

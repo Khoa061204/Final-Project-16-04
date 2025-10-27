@@ -652,5 +652,33 @@ router.patch("/:id/favorite", async (req, res) => {
     });
   }
 });
-
+  // Delete file
+  router.delete('/:id', async (req, res) => {
+    try {
+      const fileRepo = AppDataSource.getRepository(File);
+      const file = await fileRepo.findOne({ where: { id: req.params.id, user_id: req.user.id } });
+  
+      if (!file) {
+        return res.status(404).json({ message: 'File not found' });
+      }
+  
+      if (!file.s3Key) {
+        return res.status(400).json({ message: 'File does not have an S3 key' });
+      }
+  
+      // Delete from S3
+      await s3Client.send(new DeleteObjectCommand({
+        Bucket: process.env.AWS_BUCKET_NAME,
+        Key: file.s3Key
+      }));
+  
+      // Delete from database
+      await fileRepo.delete(file.id);
+  
+      res.json({ message: 'File deleted successfully' });
+    } catch (err) {
+      console.error('Error deleting file from S3:', err);
+      res.status(500).json({ message: 'Failed to delete file', error: err.message });
+    }
+  });
 module.exports = router;
